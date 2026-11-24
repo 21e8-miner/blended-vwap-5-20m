@@ -9,13 +9,20 @@
   const SVG_NS = "http://www.w3.org/2000/svg";
 
   const PRESETS = {
-    adaptive: { label: "Adaptive 5–20m", short: "Adaptive", weights: [35, 30, 20, 15], dynamic: true },
-    static:   { label: "Static Blend",   short: "Static",   weights: [35, 30, 20, 15], dynamic: false },
-    fast5:    { label: "Fast 5m Focus",  short: "Fast 5m",  weights: [75, 15, 5, 5],   dynamic: false },
-    core10:   { label: "Core 10m",       short: "Core 10m", weights: [10, 70, 15, 5],  dynamic: false },
-    anchor20: { label: "Anchor 20m",     short: "Anchor 20m", weights: [5, 10, 20, 65], dynamic: false },
-    custom:   { label: "Custom Weights", short: "Custom",   weights: [35, 30, 20, 15], dynamic: false }
+    ou_spectral: { label: "OU-Spectral 5–20m", short: "OU-Spectral", weights: [32, 34, 21, 13], dynamic: true },
+    adaptive:    { label: "Adaptive 5–20m",    short: "Adaptive",    weights: [35, 30, 20, 15], dynamic: true },
+    static:      { label: "Static Blend",      short: "Static",      weights: [35, 30, 20, 15], dynamic: false },
+    fast5:       { label: "Fast 5m Focus",     short: "Fast 5m",     weights: [75, 15, 5, 5],   dynamic: false },
+    core10:      { label: "Core 10m",          short: "Core 10m",    weights: [10, 70, 15, 5],  dynamic: false },
+    anchor20:    { label: "Anchor 20m",        short: "Anchor 20m",  weights: [5, 10, 20, 65],  dynamic: false },
+    custom:      { label: "Custom Weights",    short: "Custom",      weights: [35, 30, 20, 15], dynamic: false }
   };
+
+  const ALL_HORIZONS = [5, 6, 8, 10, 12, 15, 16, 18, 20];
+  const BLEND_HORIZONS = [5, 10, 15, 20];
+  const LN_BLEND_HORIZONS = BLEND_HORIZONS.map(h => Math.log(h));
+  const OU_GAMMA = 0.85;
+  const RADAR_SYMBOLS = ["ES", "SPY", "QQQ", "NVDA", "AAPL", "TSLA", "MSFT", "BTC-USD"];
 
   const COLORS = {
     navy: "#0B1F3A",
@@ -60,6 +67,14 @@
     tableFilter: "all",
     sortKey: "net_sharpe",
     sortDir: "desc",
+    // Tab 3 Deep Research & Radar state
+    radarSelectedSymbol: "ES",
+    radarSortKey: "absZ",
+    radarSortDir: "desc",
+    radarRows: [],
+    radarScanMs: 0,
+    // Tab 4 Editorial Blue Sheet page ("1" or "2")
+    sheetPage: "1",
     // Computed session data
     simSeries: null,
     simTrades: [],
@@ -84,6 +99,7 @@
   let RAW_METRICS = null;
   let RAW_SESSION = null;
   let BENCHMARK_SESSION = null;
+  const RADAR_SESSION_CACHE = Object.create(null);
 
   const SYMBOL_PROFILES = {
     ES:       { name: "ES Composite", basePx: 149.2,  volBps: 4.4,  spreadBps: 0.60, impact: 0.12, baseVol: 48000, crypto: false },
@@ -451,6 +467,261 @@
     return out.length >= 25 ? out.slice(-390) : null;
   }
 
+  /* ---------- Exact O(N) Phase 2 Microstructure Engine (OU, Curvature, VPIN, Hurst) ---------- */
+  function normalCdf(x) {
+    // Abramowitz & Stegun 7.1.26 fast normal CDF (max error < 1.5e-7)
+    const sign = x < 0 ? -1 : 1;
+    const z = Math.abs(x) / Math.SQRT2;
+    const t = 1.0 / (1.0 + 0.3275911 * z);
+    const poly = t * (0.254829592 + t * (-0.284496736 + t * (1.421413741 + t * (-1.453152027 + t * 1.061405429))));
+    const erf = 1.0 - poly * Math.exp(-z * z);
+    return 0.5 * (1.0 + sign * erf);
+  }
+
+  function enrichPhase2Microstructure(bars, preserveEngineFields) {
+    const n = bars.length;
+    if (n === 0) return bars;
+
+    // 1. Ensure all 9 horizon VWAPs exist via O(N) origin-shifted prefix sums when missing
+    const need9 = bars[n - 1].vwap6 === undefined || bars[n - 1].vwap18 === undefined;
+    if (need9) {
+      const p0 = (bars[0].high + bars[0].low + bars[0].close) / 3;
+      const csV = new Float64Array(n + 1);
+      const csPV = new Float64Array(n + 1);
+      for (let i = 0; i < n; i++) {
+        const b = bars[i];
+        const v = Math.max(1e-6, Number(b.volume || 1));
+        const dp = (b.high + b.low + b.close) / 3 - p0;
+        csV[i + 1] = csV[i] + v;
+        csPV[i + 1] = csPV[i] + dp * v;
+      }
+      const extraH = [6, 8, 12, 16, 18];
+      for (let i = 0; i < n; i++) {
+        const hi = i + 1;
+        for (let k = 0; k < extraH.length; k++) {
+          const h = extraH[k];
+          const lo = hi >= h ? hi - h : 0;
+          const wV = csV[hi] - csV[lo];
+          bars[i][`vwap${h}`] = p0 + (csPV[hi] - csPV[lo]) / Math.max(1e-9, wV);
+        }
+      }
+    }
+
+    // 2. Causal 1-min return volatility (lookback=15) & 5-bar rel_vol EMA
+    const logP = new Float64Array(n);
+    const r1 = new Float64Array(n);
+    const r5 = new Float64Array(n);
+    const barSig = new Float64Array(n);
+    const rvEma = new Float64Array(n);
+    const alphaV = 2.0 / 6.0;
+
+    for (let i = 0; i < n; i++) {
+      logP[i] = Math.log(Math.max(1e-6, Number(bars[i].close)));
+      if (i > 0) r1[i] = logP[i] - logP[i - 1];
+      if (i >= 5) r5[i] = logP[i] - logP[i - 5];
+      const rv = clamp(Number(bars[i].rel_vol || 1.0), 0.25, 3.50);
+      rvEma[i] = i === 0 ? rv : alphaV * rv + (1 - alphaV) * rvEma[i - 1];
+    }
+
+    const csR1 = new Float64Array(n + 1);
+    const csR1Sq = new Float64Array(n + 1);
+    const csR5 = new Float64Array(n + 1);
+    const csR5Sq = new Float64Array(n + 1);
+    for (let i = 0; i < n; i++) {
+      csR1[i + 1] = csR1[i] + r1[i];
+      csR1Sq[i + 1] = csR1Sq[i] + r1[i] * r1[i];
+      csR5[i + 1] = csR5[i] + r5[i];
+      csR5Sq[i + 1] = csR5Sq[i] + r5[i] * r5[i];
+    }
+
+    for (let i = 0; i < n; i++) {
+      if (i < 3) {
+        barSig[i] = 5.5e-4;
+      } else {
+        const lo = Math.max(1, i - 14);
+        const cnt = i - lo + 1;
+        const s1 = csR1[i + 1] - csR1[lo];
+        const s2 = csR1Sq[i + 1] - csR1Sq[lo];
+        const v = Math.max(0, (s2 - (s1 * s1) / cnt) / Math.max(1, cnt - 1));
+        barSig[i] = Math.max(2.0e-4, Math.sqrt(v));
+      }
+    }
+
+    // 3. Volume-clock OU half-life (trailing 30-bar O(N) causal AR(1) in volume time)
+    const xArr = new Float64Array(n);
+    const csUY = new Float64Array(n + 1);
+    const csU2 = new Float64Array(n + 1);
+    for (let i = 0; i < n; i++) {
+      const b = bars[i];
+      xArr[i] = (b.close - b.vwap15) / Math.max(1e-6, b.close);
+      let uy = 0;
+      let u2 = 0;
+      if (i > 0) {
+        const dtau = clamp(Number(b.rel_vol || 1.0), 0.25, 3.50);
+        const u = xArr[i - 1] * dtau;
+        const dx = xArr[i] - xArr[i - 1];
+        uy = u * dx;
+        u2 = u * u;
+      }
+      csUY[i + 1] = csUY[i] + uy;
+      csU2[i + 1] = csU2[i] + u2;
+    }
+
+    // 4. Causal Bulk-Volume VPIN (window=20)
+    const csVol = new Float64Array(n + 1);
+    const csAbsImb = new Float64Array(n + 1);
+    const csSgnImb = new Float64Array(n + 1);
+    for (let i = 0; i < n; i++) {
+      const b = bars[i];
+      const v = Math.max(1e-6, Number(b.volume || 1));
+      const lr = Math.log(Math.max(1e-6, b.close) / Math.max(1e-6, b.open));
+      const xi = clamp(lr / Math.max(barSig[i], 2.5e-4), -5.0, 5.0);
+      const sImb = v * (2.0 * normalCdf(xi) - 1.0);
+      csVol[i + 1] = csVol[i] + v;
+      csAbsImb[i + 1] = csAbsImb[i] + Math.abs(sImb);
+      csSgnImb[i + 1] = csSgnImb[i] + sImb;
+    }
+
+    const priorThetaV = Math.LN2 / 11.5;
+    const shrinkKappa = 1.6e-5;
+    const invTwoGamma2 = 1.0 / (2.0 * OU_GAMMA * OU_GAMMA);
+    const twoLn5 = 2.0 * Math.log(5.0);
+
+    for (let i = 0; i < n; i++) {
+      const b = bars[i];
+      const hi = i + 1;
+
+      // OU Half-Life
+      let tauHalf;
+      if (preserveEngineFields && Number.isFinite(Number(b.tau_half))) {
+        tauHalf = Number(b.tau_half);
+      } else {
+        const loOu = hi >= 30 ? hi - 30 : 0;
+        const sUY = csUY[hi] - csUY[loOu];
+        const sU2 = csU2[hi] - csU2[loOu];
+        const thetaV = clamp((-sUY + shrinkKappa * priorThetaV) / (sU2 + shrinkKappa), 0.025, 0.26);
+        const vSpeed = 0.36 + 0.64 * clamp(rvEma[i], 0.30, 3.20);
+        tauHalf = clamp(Math.LN2 / (thetaV * vSpeed), 5.0, 19.5);
+      }
+
+      // OU-Spectral Horizon Kernel w_h^OU(t) across {5, 10, 15, 20}
+      let w5Ou, w10Ou, w15Ou, w20Ou;
+      if (preserveEngineFields && Number.isFinite(Number(b.ou_w5)) && Number.isFinite(Number(b.ou_w20))) {
+        w5Ou = Number(b.ou_w5);
+        w10Ou = Number(b.ou_w10);
+        w15Ou = Number(b.ou_w15);
+        w20Ou = Number(b.ou_w20);
+      } else {
+        const lnTau = Math.log(clamp(tauHalf, 5.0, 19.5));
+        const k0 = -Math.pow(LN_BLEND_HORIZONS[0] - lnTau, 2) * invTwoGamma2;
+        const k1 = -Math.pow(LN_BLEND_HORIZONS[1] - lnTau, 2) * invTwoGamma2;
+        const k2 = -Math.pow(LN_BLEND_HORIZONS[2] - lnTau, 2) * invTwoGamma2;
+        const k3 = -Math.pow(LN_BLEND_HORIZONS[3] - lnTau, 2) * invTwoGamma2;
+        const kMax = Math.max(k0, k1, k2, k3);
+        const e0 = Math.exp(k0 - kMax);
+        const e1 = Math.exp(k1 - kMax);
+        const e2 = Math.exp(k2 - kMax);
+        const e3 = Math.exp(k3 - kMax);
+        const eSum = e0 + e1 + e2 + e3;
+        w5Ou = e0 / eSum;
+        w10Ou = e1 / eSum;
+        w15Ou = e2 / eSum;
+        w20Ou = e3 / eSum;
+      }
+
+      const vwapOuCalc = w5Ou * b.vwap5 + w10Ou * b.vwap10 + w15Ou * b.vwap15 + w20Ou * b.vwap20;
+      const vwapOu = (preserveEngineFields && Number.isFinite(Number(b.vwap_ou))) ? Number(b.vwap_ou) : vwapOuCalc;
+
+      const floorSig = Math.max(b.close * 0.00025, 1e-6);
+      const s5 = Math.max(0, Number(b.sigma5 ?? b.sigma_blend ?? floorSig));
+      const s10 = Math.max(0, Number(b.sigma10 ?? b.sigma_blend ?? floorSig));
+      const s15 = Math.max(0, Number(b.sigma15 ?? b.sigma_blend ?? floorSig));
+      const s20 = Math.max(0, Number(b.sigma20 ?? b.sigma_blend ?? floorSig));
+
+      const withinVar = w5Ou * s5 * s5 + w10Ou * s10 * s10 + w15Ou * s15 * s15 + w20Ou * s20 * s20;
+      const betweenVar =
+        w5Ou * Math.pow(b.vwap5 - vwapOu, 2) +
+        w10Ou * Math.pow(b.vwap10 - vwapOu, 2) +
+        w15Ou * Math.pow(b.vwap15 - vwapOu, 2) +
+        w20Ou * Math.pow(b.vwap20 - vwapOu, 2);
+      const sigmaOuCalc = Math.max(floorSig, Math.sqrt(Math.max(0, withinVar + betweenVar)));
+      const sigmaOu = (preserveEngineFields && Number.isFinite(Number(b.sigma_ou)) && Number(b.sigma_ou) > 0)
+        ? Number(b.sigma_ou)
+        : sigmaOuCalc;
+      const zOu = (preserveEngineFields && Number.isFinite(Number(b.z_ou)))
+        ? Number(b.z_ou)
+        : (b.close - vwapOu) / sigmaOu;
+
+      // Term-Structure Slope & Butterfly Curvature
+      const sigmaBar = 0.25 * (Math.max(s5, floorSig) + Math.max(s10, floorSig) + Math.max(s15, floorSig) + Math.max(s20, floorSig));
+      const slopeCalc = (b.vwap5 - b.vwap20) / sigmaBar;
+      const slope = (preserveEngineFields && Number.isFinite(Number(b.slope))) ? Number(b.slope) : slopeCalc;
+      const curvCalc = (b.vwap5 - 2.0 * b.vwap10 + b.vwap20) / sigmaBar;
+      const curvature = (preserveEngineFields && Number.isFinite(Number(b.curvature))) ? Number(b.curvature) : curvCalc;
+
+      // VPIN
+      let vpin;
+      if (preserveEngineFields && Number.isFinite(Number(b.vpin))) {
+        vpin = Number(b.vpin);
+      } else {
+        const loV = hi >= 20 ? hi - 20 : 0;
+        const winV = Math.max(1.0, csVol[hi] - csVol[loV]);
+        const winAbs = csAbsImb[hi] - csAbsImb[loV];
+        const winSgn = Math.abs(csSgnImb[hi] - csSgnImb[loV]);
+        const ramp = Math.min((i + 1) / 8.0, 1.0);
+        const vpinRaw = 0.50 * (winAbs / winV) + 0.50 * (winSgn / winV);
+        vpin = clamp((1.0 - ramp) * 0.32 + ramp * vpinRaw, 0.0, 1.0);
+      }
+
+      // Causal Local Hurst via Lo-MacKinlay VR(5)
+      let hurst;
+      if (preserveEngineFields && Number.isFinite(Number(b.hurst))) {
+        hurst = Number(b.hurst);
+      } else if (i < 10) {
+        hurst = 0.50;
+      } else {
+        const lo1 = Math.max(1, i - 39);
+        const cnt1 = i - lo1 + 1;
+        const s11 = csR1[hi] - csR1[lo1];
+        const s12 = csR1Sq[hi] - csR1Sq[lo1];
+        const var1 = Math.max((s12 - (s11 * s11) / cnt1) / Math.max(1, cnt1 - 1), 1e-12);
+        const var1Eff = 0.55 * var1 + 0.45 * Math.max(s12 / cnt1, 1e-12);
+
+        const loq = Math.max(5, i - 39);
+        const cntq = i - loq + 1;
+        const sq1 = csR5[hi] - csR5[loq];
+        const sq2 = csR5Sq[hi] - csR5Sq[loq];
+        const varqC = Math.max((sq2 - (sq1 * sq1) / cntq) / Math.max(1, cntq - 1), 1e-12);
+        const varqU = Math.max(sq2 / cntq, 1e-12);
+        const varq = 0.55 * varqC + 0.45 * varqU;
+
+        const vr = clamp(varq / (5.0 * var1Eff), 0.14, 4.50);
+        const hRaw = 0.5 + Math.log(vr) / twoLn5;
+        const rampH = Math.min((i - 10 + 1) / 12.0, 1.0);
+        hurst = clamp((1.0 - rampH) * 0.50 + rampH * hRaw, 0.18, 0.86);
+      }
+
+      const toxicFlag = (vpin >= 0.56 && hurst >= 0.54) || hurst >= 0.62 || vpin >= 0.68;
+
+      b.tau_half = tauHalf;
+      b.w5_ou = w5Ou;
+      b.w10_ou = w10Ou;
+      b.w15_ou = w15Ou;
+      b.w20_ou = w20Ou;
+      b.vwap_ou = vwapOu;
+      b.sigma_ou = sigmaOu;
+      b.z_ou = zOu;
+      b.slope = slope;
+      b.curvature = curvature;
+      b.d_curvature = i > 0 ? curvature - (bars[i - 1].curvature || 0) : 0;
+      b.vpin = vpin;
+      b.hurst = hurst;
+      b.toxic_flag = toxicFlag;
+    }
+
+    return bars;
+  }
+
   function buildCausalSession(symbol, rawBars, sourceLabel, spreadBps, impactCoeff) {
     const n = rawBars.length;
     const p0 = n > 0 ? (rawBars[0].high + rawBars[0].low + rawBars[0].close) / 3 : 100;
@@ -459,7 +730,7 @@
     const csP2V = new Float64Array(n + 1);
     let totalVol = 0;
 
-    // O(N) origin-shifted prefix sums for zero-loop rolling VWAP & dispersion across all horizons
+    // O(N) origin-shifted prefix sums for zero-loop rolling VWAP & dispersion across all 9 horizons
     for (let i = 0; i < n; i++) {
       const b = rawBars[i];
       const v = Math.max(1e-6, Number(b.volume || 1));
@@ -489,8 +760,13 @@
       const b = rawBars[i];
       const relVol = Math.max(0.25, Number(b.volume || 1) / Math.max(1e-6, meanVol));
       const [v5, s5] = calcH(i, 5, b.close);
+      const [v6] = calcH(i, 6, b.close);
+      const [v8] = calcH(i, 8, b.close);
       const [v10, s10] = calcH(i, 10, b.close);
+      const [v12] = calcH(i, 12, b.close);
       const [v15, s15] = calcH(i, 15, b.close);
+      const [v16] = calcH(i, 16, b.close);
+      const [v18] = calcH(i, 18, b.close);
       const [v20, s20] = calcH(i, 20, b.close);
 
       // Causal adaptive volume-clock weights (fast tilt on high rel_vol, anchor tilt on calm lull)
@@ -527,8 +803,13 @@
         volume: b.volume,
         rel_vol: Number(relVol.toFixed(3)),
         vwap5: v5,
+        vwap6: v6,
+        vwap8: v8,
         vwap10: v10,
+        vwap12: v12,
         vwap15: v15,
+        vwap16: v16,
+        vwap18: v18,
         vwap20: v20,
         sigma5: s5,
         sigma10: s10,
@@ -544,6 +825,8 @@
         w20
       };
     }
+
+    enrichPhase2Microstructure(bars, false);
 
     // Pick richest ~90-min spotlight window with most |z| >= 1.50 excursions
     const winLen = Math.min(90, Math.max(40, n - 25));
@@ -838,12 +1121,27 @@
       else if (z >= state.entryZ) zEl.classList.add("zone-short");
     }
     if ($("telRelVol")) $("telRelVol").textContent = `${fmt(bar.rel_vol || 1.0, 2)}\u00D7`;
+    if ($("telOuTau")) $("telOuTau").textContent = Number.isFinite(Number(bar.tau_half)) ? `${fmt(bar.tau_half, 1)}m` : "—";
+    const vpinEl = $("telVpin");
+    if (vpinEl) {
+      const vp = Number(bar.vpin);
+      vpinEl.textContent = Number.isFinite(vp) ? fmt(vp, 2) : "—";
+      vpinEl.classList.remove("high", "low");
+      if (Number.isFinite(vp)) {
+        if (vp >= 0.56) vpinEl.classList.add("high");
+        else if (vp <= 0.42) vpinEl.classList.add("low");
+      }
+    }
     if ($("telEngineMs")) $("telEngineMs").textContent = `${fmt(state.lastComputeMs, 2)} ms`;
 
     const sigEl = $("telSignalState");
     if (sigEl) {
       sigEl.classList.remove("long", "short");
-      if (z <= -state.entryZ) {
+      const isVetoed = state.preset === "ou_spectral" && Boolean(bar.toxic_flag) && Math.abs(z) >= state.entryZ;
+      if (isVetoed) {
+        sigEl.textContent = "VETOED TOXIC";
+        sigEl.classList.add("short");
+      } else if (z <= -state.entryZ) {
         sigEl.textContent = "LONG ENTRY ZONE";
         sigEl.classList.add("long");
       } else if (z >= state.entryZ) {
@@ -933,7 +1231,7 @@
     const i = n - 1;
     const b = bars[i];
     const relVol = Math.max(0.25, Number(b.volume || 1) / Math.max(1e-6, meanVol));
-    const horizons = [5, 10, 15, 20];
+    const horizons = ALL_HORIZONS;
     const vwaps = {};
     const sigmas = {};
 
@@ -998,8 +1296,13 @@
       volume: b.volume,
       rel_vol: Number(relVol.toFixed(3)),
       vwap5: vwaps[5],
+      vwap6: vwaps[6],
+      vwap8: vwaps[8],
       vwap10: vwaps[10],
+      vwap12: vwaps[12],
       vwap15: vwaps[15],
+      vwap16: vwaps[16],
+      vwap18: vwaps[18],
       vwap20: vwaps[20],
       sigma5: sigmas[5],
       sigma10: sigmas[10],
@@ -1012,6 +1315,10 @@
       w5, w10, w15, w20
     };
     for (let k = 0; k < n; k++) bars[k].idx = k;
+    enrichPhase2Microstructure(bars, false);
+    if (RADAR_SYMBOLS.includes(state.symbol)) {
+      RADAR_SESSION_CACHE[state.symbol] = RAW_SESSION;
+    }
     return bars[i];
   }
 
@@ -1061,6 +1368,11 @@
     const idx = RAW_SESSION.bars.length - 1;
     evaluateLiveTriggers(updated, state.simSeries.vwapBlend[idx], state.simSeries.zSeries[idx]);
     scheduleLabRender();
+    if (state.activeTab === "research") {
+      runMultiAssetRadarScan();
+      renderRadarTable();
+      renderTermStructureChart();
+    }
   }
 
   function disconnectLiveWebSocket() {
@@ -1300,9 +1612,21 @@
     // Effective lookback horizon for causal sigma estimation when custom weights are active
     const effHorizon = Math.max(5, Math.round(5 * w5Fixed + 10 * w10Fixed + 15 * w15Fixed + 20 * w20Fixed));
 
+    if (bars.length > 0 && bars[bars.length - 1].w5_ou === undefined) {
+      enrichPhase2Microstructure(bars, state.symbol === "ES" && state.symbolSource === "benchmark");
+    }
+
     for (let i = 0; i < n; i++) {
       const b = bars[i];
-      if (state.preset === "adaptive") {
+      if (state.preset === "ou_spectral") {
+        vwapBlend[i] = Number(b.vwap_ou ?? b.vwap_adaptive);
+        sigmaBlend[i] = Math.max(1e-6, Number(b.sigma_ou ?? b.sigma_blend));
+        zSeries[i] = Number(b.z_ou ?? b.z_score);
+        w5Arr[i] = Number(b.w5_ou ?? b.w5);
+        w10Arr[i] = Number(b.w10_ou ?? b.w10);
+        w15Arr[i] = Number(b.w15_ou ?? b.w15);
+        w20Arr[i] = Number(b.w20_ou ?? b.w20);
+      } else if (state.preset === "adaptive") {
         vwapBlend[i] = Number(b.vwap_adaptive);
         sigmaBlend[i] = Math.max(1e-6, Number(b.sigma_blend));
         zSeries[i] = Number(b.z_score);
@@ -1394,14 +1718,32 @@
           i += 1;
           continue;
         }
+
+        // OU-Spectral Curvature-VPIN Gate: 4-horizon consensus, curvature deceleration & VPIN+Hurst toxic-trend veto
+        if (state.preset === "ou_spectral") {
+          const agree4 = side === "LONG"
+            ? (entryPx < b.vwap5 && entryPx < b.vwap10 && entryPx < b.vwap15 && entryPx < b.vwap20)
+            : (entryPx > b.vwap5 && entryPx > b.vwap10 && entryPx > b.vwap15 && entryPx > b.vwap20);
+          const slopeAbs = Math.abs(Number(b.slope || 0));
+          const curvAgainst = (-dir) * Number(b.d_curvature || 0);
+          const curvReject = curvAgainst > 0.55 && slopeAbs > 0.95;
+          if (!agree4 || slopeAbs > 1.48 || curvReject || Boolean(b.toxic_flag)) {
+            i += 1;
+            continue;
+          }
+        }
+
         const entrySig = sigmaBlend[i];
         const initGap = Math.abs(entryVwap - entryPx);
         const targetMove = 0.72 * initGap;
-        let exitIdx = Math.min(n - 2, entryIdx + maxHold);
+        const effMaxHold = state.preset === "ou_spectral"
+          ? clamp(Math.round(1.6 * Number(b.tau_half || 10)), minHold, maxHold)
+          : maxHold;
+        let exitIdx = Math.min(n - 2, entryIdx + effMaxHold);
         let peakRev = 0;
         let armedTrail = false;
 
-        for (let t = entryIdx + minHold; t <= Math.min(n - 2, entryIdx + maxHold); t++) {
+        for (let t = entryIdx + minHold; t <= Math.min(n - 2, entryIdx + effMaxHold); t++) {
           const zt = zSeries[t];
           const pxMove = dir * (bars[t].close - entryPx);
           if (pxMove > peakRev) peakRev = pxMove;
@@ -1483,7 +1825,8 @@
     const bounds = getZoomBounds();
     let displayWeights = state.weights.slice();
 
-    if (state.preset === "adaptive" && state.simSeries) {
+    const isDynamicPreset = PRESETS[state.preset] && PRESETS[state.preset].dynamic;
+    if (isDynamicPreset && state.simSeries) {
       let s5 = 0, s10 = 0, s15 = 0, s20 = 0, cnt = 0;
       for (let i = bounds.start; i <= bounds.end; i++) {
         s5 += state.simSeries.w5Arr[i];
@@ -1511,7 +1854,7 @@
     $("valW15").textContent = `${displayWeights[2]}%`;
     $("valW20").textContent = `${displayWeights[3]}%`;
 
-    $("weightSumBadge").textContent = state.preset === "adaptive" ? "Dynamic 100%" : "100%";
+    $("weightSumBadge").textContent = state.preset === "ou_spectral" ? "OU Kernel 100%" : (isDynamicPreset ? "Dynamic 100%" : "100%");
     $("presetActiveLabel").textContent = PRESETS[state.preset].short;
     $("valEntryZ").textContent = `${state.entryZ.toFixed(2)}\u03C3`;
     $("valMaxHold").textContent = `${state.maxHold} min`;
@@ -1522,7 +1865,7 @@
       if (spans[idx]) spans[idx].style.width = `${w}%`;
     });
     $("kpiWeightText").textContent = `${displayWeights[0]} / ${displayWeights[1]} / ${displayWeights[2]} / ${displayWeights[3]}%`;
-    $("kpiWeightMode").textContent = state.preset === "adaptive" ? "Dynamic" : "Fixed";
+    $("kpiWeightMode").textContent = state.preset === "ou_spectral" ? "OU-Spectral" : (isDynamicPreset ? "Dynamic" : "Fixed");
   }
 
   function updateKPIStrip() {
@@ -1570,7 +1913,11 @@
       (RAW_METRICS && RAW_METRICS.configs && RAW_METRICS.configs.find(c => c.is_flagship)) ||
       (RAW_METRICS && RAW_METRICS.configs && RAW_METRICS.configs[0]);
 
-    if (state.turboMode && state.symbol === "ES" && RAW_METRICS && RAW_METRICS.turbo_benchmark && state.preset === "adaptive") {
+    const rlWf = RAW_METRICS && RAW_METRICS.research_lab && RAW_METRICS.research_lab.walk_forward_dsr;
+    if (state.preset === "ou_spectral" && state.symbol === "ES" && rlWf) {
+      const ouRef = state.turboMode ? rlWf.ou_spectral_turbo : rlWf.ou_spectral_1x;
+      netSharpeDisp = ouRef ? `SR ${fmt(ouRef.full_sharpe, 2)} (OOS ${fmt(ouRef.oos_sharpe, 2)})` : computeImpliedSharpe(allTrades);
+    } else if (state.turboMode && state.symbol === "ES" && RAW_METRICS && RAW_METRICS.turbo_benchmark && state.preset === "adaptive") {
       const tb = RAW_METRICS.turbo_benchmark;
       netSharpeDisp = `SR ${fmt(tb.turbo_net_sharpe, 2)} · ${fmt(tb.profit_multiple, 1)}\u00D7`;
     } else if (isDefaultAdaptive && flagshipCfg) {
@@ -2099,6 +2446,8 @@
           <span class="tt-k">5m / 10m VWAP</span><span class="tt-v">${fmt(b.vwap5, 2)} / ${fmt(b.vwap10, 2)}</span>
           <span class="tt-k">15m / 20m VWAP</span><span class="tt-v">${fmt(b.vwap15, 2)} / ${fmt(b.vwap20, 2)}</span>
           <span class="tt-k">Blended z-Score</span><span class="tt-v">${fmtSigned(sim.zSeries[barIdx], 2)}&sigma;</span>
+          <span class="tt-k">OU &tau;&#189; / Curv C<sub>t</sub></span><span class="tt-v">${fmt(b.tau_half, 1)}m / ${fmtSigned(b.curvature, 2)}</span>
+          <span class="tt-k">VPIN / Hurst H&#770;</span><span class="tt-v">${fmt(b.vpin, 2)} / ${fmt(b.hurst, 2)}</span>
           <span class="tt-k">Rel. Volume</span><span class="tt-v">${fmt(b.rel_vol, 2)}&times;</span>
         </div>
         <div class="tt-weights num">
@@ -2960,9 +3309,695 @@
     }
   }
 
+  /* ==========================================================================
+     TAB 3: DEEP RESEARCH & LIVE 8-ASSET SCANNER
+     ========================================================================== */
+
+  function ensureRadarSession(symbol) {
+    if (symbol === state.symbol && RAW_SESSION && RAW_SESSION.bars && RAW_SESSION.bars.length) {
+      RADAR_SESSION_CACHE[symbol] = RAW_SESSION;
+      return RAW_SESSION;
+    }
+    if (symbol === "ES" && BENCHMARK_SESSION) {
+      if (!RADAR_SESSION_CACHE.ES) RADAR_SESSION_CACHE.ES = BENCHMARK_SESSION;
+      return RADAR_SESSION_CACHE.ES;
+    }
+    if (!RADAR_SESSION_CACHE[symbol]) {
+      const profile = getSymbolProfile(symbol);
+      const { bars: simBars } = generateCalibratedSymbolBars(symbol);
+      RADAR_SESSION_CACHE[symbol] = buildCausalSession(
+        symbol, simBars, "Calibrated 1m Model", profile.spreadBps, profile.impact
+      );
+    }
+    return RADAR_SESSION_CACHE[symbol];
+  }
+
+  function runMultiAssetRadarScan() {
+    // Warm up sessions first so timed block measures pure vectorized O(N) multi-asset microstructure scan
+    const sessions = RADAR_SYMBOLS.map(sym => ({ sym, sess: ensureRadarSession(sym) }));
+    const t0 = typeof performance !== "undefined" ? performance.now() : 0;
+    const rows = [];
+    let totalBars = 0;
+
+    for (let k = 0; k < sessions.length; k++) {
+      const { sym, sess } = sessions[k];
+      const bars = sess.bars;
+      totalBars += bars.length;
+      const preserve = sym === "ES" && sess === BENCHMARK_SESSION;
+      enrichPhase2Microstructure(bars, preserve);
+
+      const b = bars[bars.length - 1];
+      const z = Number(b.z_ou ?? b.z_score ?? 0);
+      const absZ = Math.abs(z);
+      const tau = Number(b.tau_half ?? 10.0);
+      const curv = Number(b.curvature ?? 0);
+      const slope = Number(b.slope ?? 0);
+      const vpin = Number(b.vpin ?? 0.35);
+      const hurst = Number(b.hurst ?? 0.50);
+      const toxic = Boolean(b.toxic_flag);
+
+      let hurstCls = "neutral";
+      let hurstLabel = "NEUTRAL";
+      if (hurst < 0.48) {
+        hurstCls = "reverting";
+        hurstLabel = "REVERTING";
+      } else if (hurst > 0.56 || toxic) {
+        hurstCls = "toxic";
+        hurstLabel = "TOXIC TREND";
+      }
+
+      let actionCls = "watching";
+      let actionLabel = "WATCHING";
+      let actionRank = 1;
+      if (absZ >= state.entryZ) {
+        if (toxic) {
+          actionCls = "vetoed";
+          actionLabel = "VETOED TOXIC";
+          actionRank = 3;
+        } else if (z <= -state.entryZ) {
+          actionCls = "strong-long";
+          actionLabel = "STRONG LONG";
+          actionRank = 4;
+        } else {
+          actionCls = "strong-short";
+          actionLabel = "STRONG SHORT";
+          actionRank = 4;
+        }
+      } else if (toxic) {
+        actionCls = "vetoed";
+        actionLabel = "VETOED TOXIC";
+        actionRank = 2;
+      }
+
+      rows.push({
+        symbol: sym,
+        price: Number(b.close),
+        vwapOu: Number(b.vwap_ou ?? b.vwap_adaptive),
+        z,
+        absZ,
+        tauHalf: tau,
+        curvature: curv,
+        slope,
+        vpin,
+        hurst,
+        toxic,
+        hurstCls,
+        hurstLabel,
+        actionCls,
+        actionLabel,
+        actionRank,
+        bar: b
+      });
+    }
+
+    const elapsed = typeof performance !== "undefined" ? Math.max(0.12, performance.now() - t0) : 1.2;
+    state.radarScanMs = elapsed;
+    state.radarRows = rows;
+
+    const badge = $("radarLatencyBadge");
+    if (badge) {
+      badge.textContent = `${RADAR_SYMBOLS.length} Assets · ${fmtInt(totalBars)} Bars · ${fmt(elapsed, 2)} ms`;
+    }
+  }
+
+  function renderRadarTable() {
+    const tbody = $("radarTableBody");
+    if (!tbody) return;
+    clearEl(tbody);
+
+    const rows = state.radarRows.slice();
+    const key = state.radarSortKey;
+    const dir = state.radarSortDir === "asc" ? 1 : -1;
+    rows.sort((a, b) => {
+      if (key === "symbol") return a.symbol.localeCompare(b.symbol) * dir;
+      return (Number(a[key] || 0) - Number(b[key] || 0)) * dir;
+    });
+
+    document.querySelectorAll("#radarTable thead th.sortable").forEach(th => {
+      const arrow = th.querySelector(".sort-arrow");
+      if (!arrow) return;
+      if (th.dataset.rsort === state.radarSortKey) {
+        arrow.innerHTML = state.radarSortDir === "asc" ? "&#9650;" : "&#9660;";
+      } else {
+        arrow.textContent = "";
+      }
+    });
+
+    for (const r of rows) {
+      const tr = document.createElement("tr");
+      if (state.radarSelectedSymbol === r.symbol) tr.classList.add("selected-row");
+      const digits = r.price >= 1000 ? 1 : 2;
+      const vpinPct = clamp(Math.round(r.vpin * 100), 4, 100);
+      const vpinColor = r.vpin >= 0.56 ? COLORS.short : (r.vpin >= 0.44 ? COLORS.cobalt : COLORS.long);
+
+      tr.innerHTML = `
+        <td class="left"><strong>${r.symbol}</strong></td>
+        <td class="num">${fmt(r.price, digits)}</td>
+        <td class="num">${fmt(r.vwapOu, digits)}</td>
+        <td class="num ${r.z <= -state.entryZ ? "pnl-pos" : r.z >= state.entryZ ? "pnl-neg" : ""}">${fmtSigned(r.z, 2)}&sigma;</td>
+        <td class="num">${fmt(r.tauHalf, 1)}m</td>
+        <td class="num">${fmtSigned(r.curvature, 2)}</td>
+        <td class="num"><span class="vpin-cell"><span>${fmt(r.vpin, 2)}</span><span class="vpin-bar"><i style="width:${vpinPct}%; background:${vpinColor};"></i></span></span></td>
+        <td class="center"><span class="hurst-pill ${r.hurstCls}">${fmt(r.hurst, 2)} · ${r.hurstLabel}</span></td>
+        <td class="center"><span class="action-pill ${r.actionCls}">${r.actionLabel}</span></td>
+        <td class="center"><button type="button" class="btn-radar-inspect" data-inspect="${r.symbol}">Inspect &rarr;</button></td>
+      `;
+
+      tr.addEventListener("click", evt => {
+        if (evt.target && evt.target.dataset && evt.target.dataset.inspect) return;
+        state.radarSelectedSymbol = r.symbol;
+        renderRadarTable();
+        renderTermStructureChart();
+      });
+
+      const inspectBtn = tr.querySelector(".btn-radar-inspect");
+      if (inspectBtn) {
+        inspectBtn.addEventListener("click", evt => {
+          evt.stopPropagation();
+          state.radarSelectedSymbol = r.symbol;
+          loadSymbol(r.symbol);
+          switchTab("lab");
+        });
+      }
+
+      tbody.appendChild(tr);
+    }
+  }
+
+  function renderTermStructureChart() {
+    const svg = $("termStructureChart");
+    if (!svg) return;
+    clearEl(svg);
+
+    const sym = state.radarSelectedSymbol || state.symbol || "ES";
+    const row = state.radarRows.find(r => r.symbol === sym) || state.radarRows[0];
+    if (!row || !row.bar) return;
+
+    const b = row.bar;
+    const digits = b.close >= 1000 ? 1 : 2;
+    if ($("tsCurveTitle")) $("tsCurveTitle").textContent = `5–20m VWAP Term-Structure · ${row.symbol}`;
+    if ($("tsFactorLevel")) $("tsFactorLevel").textContent = `$${fmt(row.vwapOu, digits)}`;
+    if ($("tsFactorSlope")) $("tsFactorSlope").textContent = `${fmtSigned(row.slope, 2)}\u03C3`;
+    if ($("tsFactorCurv")) $("tsFactorCurv").textContent = `${fmtSigned(row.curvature, 2)}\u03C3`;
+    if ($("tsFactorTau")) $("tsFactorTau").textContent = `${fmt(row.tauHalf, 1)}m`;
+    if ($("tsFactorVpin")) $("tsFactorVpin").textContent = fmt(row.vpin, 2);
+
+    const anchor20 = Number(b.vwap20 ?? row.vwapOu);
+    const sigEnv = Math.max(b.close * 0.00025, Number(b.sigma_ou ?? b.sigma_blend ?? b.close * 0.0008));
+
+    const curvePts = ALL_HORIZONS.map(h => {
+      const px = Number(b[`vwap${h}`] ?? row.vwapOu);
+      return {
+        h,
+        px,
+        bpsVs20: ((px - anchor20) / Math.max(1e-6, anchor20)) * 10000
+      };
+    });
+
+    const W = 540;
+    const H = 218;
+    const padL = 56;
+    const padR = 54;
+    const padT = 18;
+    const padB = 30;
+    const plotW = W - padL - padR;
+    const plotH = H - padT - padB;
+
+    const allPrices = curvePts.map(p => p.px).concat([
+      b.close,
+      row.vwapOu,
+      row.vwapOu + sigEnv * 0.65,
+      row.vwapOu - sigEnv * 0.65
+    ]);
+    let pMin = Math.min(...allPrices);
+    let pMax = Math.max(...allPrices);
+    const span = Math.max(pMax - pMin, b.close * 0.0008);
+    pMin -= span * 0.14;
+    pMax += span * 0.14;
+
+    const xOf = h => padL + ((h - 5) / 15) * plotW;
+    const yOf = p => padT + plotH - ((p - pMin) / Math.max(1e-9, pMax - pMin)) * plotH;
+
+    // Subtle shaded 9-14m Core band
+    svg.appendChild(svgEl("rect", {
+      x: xOf(9), y: padT, width: xOf(14) - xOf(9), height: plotH,
+      fill: COLORS.ice
+    }));
+
+    // Horizontal dashed gridlines & left Price / right bps-vs-20m ticks
+    for (let k = 0; k <= 4; k++) {
+      const pVal = pMin + (k / 4) * (pMax - pMin);
+      const y = yOf(pVal);
+      const bpsVal = ((pVal - anchor20) / Math.max(1e-6, anchor20)) * 10000;
+      svg.appendChild(svgEl("line", {
+        x1: padL, y1: y, x2: padL + plotW, y2: y,
+        stroke: k === 0 ? COLORS.navy : COLORS.grid,
+        "stroke-width": k === 0 ? 1.1 : 0.8,
+        "stroke-dasharray": k === 0 ? null : "3,3"
+      }));
+      svg.appendChild(svgEl("text", {
+        x: padL - 6, y: y + 3.5, "text-anchor": "end",
+        fill: COLORS.muted, "font-size": 9.3,
+        "font-family": "Segoe UI, sans-serif", "font-variant-numeric": "tabular-nums"
+      }, pVal.toFixed(digits)));
+      svg.appendChild(svgEl("text", {
+        x: padL + plotW + 6, y: y + 3.5,
+        fill: COLORS.muted, "font-size": 9.1,
+        "font-family": "Segoe UI, sans-serif", "font-variant-numeric": "tabular-nums"
+      }, `${fmtSigned(bpsVal, 1)}bp`));
+    }
+
+    // Left spine
+    svg.appendChild(svgEl("line", {
+      x1: padL, y1: padT, x2: padL, y2: padT + plotH,
+      stroke: COLORS.navy, "stroke-width": 1.1
+    }));
+
+    // Translucent ±0.5σ envelope around term-structure curve
+    const envUp = curvePts.map(p => `${xOf(p.h).toFixed(1)},${yOf(p.px + sigEnv * 0.5).toFixed(1)}`);
+    const envDn = curvePts.slice().reverse().map(p => `${xOf(p.h).toFixed(1)},${yOf(p.px - sigEnv * 0.5).toFixed(1)}`);
+    svg.appendChild(svgEl("polygon", {
+      points: envUp.concat(envDn).join(" "),
+      fill: "#3B76C4", "fill-opacity": 0.12
+    }));
+
+    // Horizontal Spot Price reference line
+    const ySpot = yOf(b.close);
+    svg.appendChild(svgEl("line", {
+      x1: padL, y1: ySpot, x2: padL + plotW, y2: ySpot,
+      stroke: row.z <= 0 ? COLORS.long : COLORS.short,
+      "stroke-width": 1.25, "stroke-dasharray": "4,3"
+    }));
+    const spotLblY = clamp(ySpot - 5, padT + 11, padT + plotH - 5);
+    svg.appendChild(svgEl("text", {
+      x: padL + plotW - 4, y: spotLblY, "text-anchor": "end",
+      fill: row.z <= 0 ? COLORS.long : COLORS.short,
+      "font-size": 9.4, "font-weight": 700,
+      "font-family": "Segoe UI, sans-serif", "font-variant-numeric": "tabular-nums"
+    }, `Spot $${fmt(b.close, digits)} (${fmtSigned(row.z, 2)}\u03C3)`));
+
+    // Continuous 9-Horizon VWAP Curve
+    const linePts = curvePts.map(p => `${xOf(p.h).toFixed(1)},${yOf(p.px).toFixed(1)}`).join(" ");
+    svg.appendChild(svgEl("polyline", {
+      points: linePts, fill: "none",
+      stroke: COLORS.cobalt, "stroke-width": 2.2, "stroke-linejoin": "round"
+    }));
+
+    // Horizon dots & X-axis labels
+    const tt = $("tsTooltip");
+    for (const p of curvePts) {
+      const cx = xOf(p.h);
+      const cy = yOf(p.px);
+      const isBlendNode = BLEND_HORIZONS.includes(p.h);
+      const dot = svgEl("circle", {
+        cx, cy, r: isBlendNode ? 4.2 : 3.0,
+        fill: isBlendNode ? COLORS.cobalt : "#FFFFFF",
+        stroke: COLORS.cobalt, "stroke-width": 1.5,
+        style: "cursor:pointer;"
+      });
+      dot.addEventListener("mouseenter", () => {
+        if (!tt) return;
+        tt.innerHTML = `
+          <div class="tt-head">
+            <span class="tt-time">${row.symbol} · ${p.h}m VWAP</span>
+            <span class="tt-px num">$${fmt(p.px, digits)}</span>
+          </div>
+          <div class="tt-grid num">
+            <span class="tt-k">vs 20m Anchor</span><span class="tt-v">${fmtSigned(p.bpsVs20, 2)} bp</span>
+            <span class="tt-k">Spot - VWAP</span><span class="tt-v">${fmtSigned(((b.close - p.px) / p.px) * 10000, 2)} bp</span>
+          </div>
+        `;
+        tt.classList.add("visible");
+        tt.style.top = "10px";
+        tt.style.left = p.h > 12 ? "62px" : "auto";
+        tt.style.right = p.h > 12 ? "auto" : "60px";
+      });
+      dot.addEventListener("mouseleave", () => {
+        if (tt) tt.classList.remove("visible");
+      });
+      svg.appendChild(dot);
+
+      if (isBlendNode || p.h === 8 || p.h === 12 || p.h === 18) {
+        svg.appendChild(svgEl("text", {
+          x: cx, y: H - 9, "text-anchor": "middle",
+          fill: isBlendNode ? COLORS.navy : COLORS.muted,
+          "font-size": 9.4, "font-weight": isBlendNode ? 600 : 400,
+          "font-family": "Segoe UI, sans-serif", "font-variant-numeric": "tabular-nums"
+        }, `${p.h}m`));
+      }
+    }
+
+    // OU-Spectral Blend Diamond Marker positioned at effective half-life τ½
+    const ouX = xOf(clamp(row.tauHalf, 5, 20));
+    const ouY = yOf(row.vwapOu);
+    svg.appendChild(svgEl("line", {
+      x1: ouX, y1: ouY, x2: ouX, y2: padT + plotH,
+      stroke: COLORS.navy, "stroke-width": 1, "stroke-dasharray": "2.5,2.5", opacity: 0.7
+    }));
+    const dSize = 6.2;
+    svg.appendChild(svgEl("polygon", {
+      points: `${ouX},${ouY - dSize} ${ouX + dSize},${ouY} ${ouX},${ouY + dSize} ${ouX - dSize},${ouY}`,
+      fill: COLORS.navy, stroke: "#FFFFFF", "stroke-width": 1.4
+    }));
+    const ouLblAnchor = ouX > padL + plotW * 0.60 ? "end" : "start";
+    const ouLblX = ouLblAnchor === "end" ? ouX - 9 : ouX + 9;
+    const preferBelow = ouY < padT + 42 || (curvePts[2] && yOf(curvePts[2].px) < ouY + 4);
+    const ouLblY = clamp(ouY + (preferBelow ? 18 : -13), padT + 13, padT + plotH - 18);
+    svg.appendChild(svgEl("text", {
+      x: ouLblX, y: ouLblY, "text-anchor": ouLblAnchor,
+      fill: COLORS.navy, "font-size": 9.4, "font-weight": 700,
+      stroke: "#FFFFFF", "stroke-width": 3, "paint-order": "stroke",
+      "font-family": "Georgia, serif"
+    }, `OU-Spectral (\u03C4\u00BD ${fmt(row.tauHalf, 1)}m)`));
+  }
+
+  function renderAlphaDecayChart() {
+    const svg = $("alphaDecayChart");
+    if (!svg) return;
+    clearEl(svg);
+
+    const rl = RAW_METRICS && RAW_METRICS.research_lab;
+    const pts = rl && Array.isArray(rl.alpha_decay_curve) ? rl.alpha_decay_curve : null;
+    if (!pts || pts.length < 2) {
+      svg.appendChild(svgEl("text", {
+        x: 270, y: 108, "text-anchor": "middle",
+        fill: COLORS.muted, "font-size": 11.5, "font-style": "italic", "font-family": "Georgia, serif"
+      }, "Awaiting research_lab.alpha_decay_curve from quantitative pipeline…"));
+      return;
+    }
+
+    const W = 540;
+    const H = 214;
+    const padL = 46;
+    const padR = 18;
+    const padT = 22;
+    const padB = 28;
+    const plotW = W - padL - padR;
+    const plotH = H - padT - padB;
+
+    const minH = pts[0].horizon_min;
+    const maxH = pts[pts.length - 1].horizon_min;
+    const xOf = h => padL + ((h - minH) / Math.max(1, maxH - minH)) * plotW;
+
+    const vals = [];
+    for (const p of pts) {
+      vals.push(Number(p.ou_spectral_vpin_net_bps || 0), Number(p.adaptive_blend_net_bps || 0), Number(p.single_8m_net_bps || 0));
+    }
+    const yMin = Math.min(-1.0, Math.floor(Math.min(...vals) - 0.15));
+    const yMax = Math.max(2.0, Math.ceil(Math.max(...vals) + 0.55));
+    const yOf = v => padT + plotH - ((v - yMin) / Math.max(1e-6, yMax - yMin)) * plotH;
+
+    // Ice-Blue 5-20m Sweet Spot Backdrop
+    svg.appendChild(svgEl("rect", {
+      x: xOf(5), y: padT, width: xOf(20) - xOf(5), height: plotH,
+      fill: COLORS.ice
+    }));
+    svg.appendChild(svgEl("text", {
+      x: (xOf(5) + xOf(20)) / 2, y: padT + 11, "text-anchor": "middle",
+      fill: COLORS.cobalt, "font-size": 9.2, "font-style": "italic", "font-family": "Georgia, serif"
+    }, "5–20m Blended Sweet Spot"));
+
+    // Clean integer horizontal gridlines & Y ticks
+    const yTickStep = (yMax - yMin) > 5 ? 2.0 : 1.0;
+    for (let v = yMin; v <= yMax + 1e-6; v += yTickStep) {
+      const y = yOf(v);
+      svg.appendChild(svgEl("line", {
+        x1: padL, y1: y, x2: padL + plotW, y2: y,
+        stroke: Math.abs(v) < 1e-6 ? "#8CA8C8" : COLORS.grid,
+        "stroke-width": Math.abs(v) < 1e-6 ? 1.0 : 0.8,
+        "stroke-dasharray": Math.abs(v) < 1e-6 ? null : "3,3"
+      }));
+      svg.appendChild(svgEl("text", {
+        x: padL - 6, y: y + 3.5, "text-anchor": "end",
+        fill: COLORS.muted, "font-size": 9.3,
+        "font-family": "Segoe UI, sans-serif", "font-variant-numeric": "tabular-nums"
+      }, `${v > 0 ? "+" : ""}${v.toFixed(1)}bp`));
+    }
+
+    // Axes spines
+    svg.appendChild(svgEl("line", { x1: padL, y1: padT, x2: padL, y2: padT + plotH, stroke: COLORS.navy, "stroke-width": 1.15 }));
+    svg.appendChild(svgEl("line", { x1: padL, y1: padT + plotH, x2: padL + plotW, y2: padT + plotH, stroke: COLORS.navy, "stroke-width": 1.15 }));
+
+    // Curves: 8m Single, Adaptive Blend, OU-Spectral VPIN
+    const seriesSpecs = [
+      { key: "single_8m_net_bps",       color: COLORS.cerulean, width: 1.5, dash: "4,3", dots: false },
+      { key: "adaptive_blend_net_bps",  color: COLORS.cobalt,   width: 1.8, dash: null,  dots: false },
+      { key: "ou_spectral_vpin_net_bps", color: COLORS.navy,    width: 2.3, dash: null,  dots: true }
+    ];
+
+    for (const sp of seriesSpecs) {
+      const poly = pts.map(p => `${xOf(p.horizon_min).toFixed(1)},${yOf(Number(p[sp.key] || 0)).toFixed(1)}`).join(" ");
+      svg.appendChild(svgEl("polyline", {
+        points: poly, fill: "none",
+        stroke: sp.color, "stroke-width": sp.width, "stroke-dasharray": sp.dash,
+        "stroke-linejoin": "round", "stroke-linecap": "round"
+      }));
+      if (sp.dots) {
+        for (const p of pts) {
+          svg.appendChild(svgEl("circle", {
+            cx: xOf(p.horizon_min), cy: yOf(Number(p[sp.key] || 0)),
+            r: p.in_sweet_spot ? 3.2 : 2.3,
+            fill: COLORS.navy, stroke: "#FFFFFF", "stroke-width": 1.0
+          }));
+        }
+      }
+    }
+
+    // Peak OU-Spectral Net Edge Pill (placed cleanly below the OU vertex so Adaptive curve stays 100% unobstructed)
+    const peakPt = pts.reduce((best, p) =>
+      Number(p.ou_spectral_vpin_net_bps || -99) > Number(best.ou_spectral_vpin_net_bps || -99) ? p : best, pts[0]
+    );
+    const px = xOf(peakPt.horizon_min);
+    const py = yOf(Number(peakPt.ou_spectral_vpin_net_bps || 0));
+    const badgeW = 98;
+    const bx = clamp(px - badgeW / 2, padL + 4, padL + plotW - badgeW - 4);
+    const by = clamp(py + 13, padT + 18, padT + plotH - 22);
+    svg.appendChild(svgEl("line", {
+      x1: px, y1: py + 3.5, x2: px, y2: by,
+      stroke: COLORS.navy, "stroke-width": 1.0, "stroke-dasharray": "2,1.5"
+    }));
+    svg.appendChild(svgEl("rect", { x: bx, y: by, width: badgeW, height: 15, rx: 3, fill: COLORS.navy }));
+    svg.appendChild(svgEl("text", {
+      x: bx + badgeW / 2, y: by + 10.5, "text-anchor": "middle",
+      fill: "#FFFFFF", "font-size": 8.9, "font-weight": 600,
+      "font-family": "Segoe UI, sans-serif", "font-variant-numeric": "tabular-nums"
+    }, `Peak ${fmtSigned(peakPt.ou_spectral_vpin_net_bps, 2)}bp @ ${peakPt.horizon_min}m`));
+
+    // X-axis horizon ticks
+    [1, 5, 10, 15, 20, 25, 30].forEach(h => {
+      const tx = xOf(h);
+      svg.appendChild(svgEl("line", { x1: tx, y1: padT + plotH, x2: tx, y2: padT + plotH + 3.5, stroke: COLORS.navy, "stroke-width": 1 }));
+      svg.appendChild(svgEl("text", {
+        x: tx, y: H - 7, "text-anchor": "middle",
+        fill: (h >= 5 && h <= 20) ? COLORS.navy : COLORS.muted,
+        "font-size": 9.3, "font-weight": (h >= 5 && h <= 20) ? 600 : 400,
+        "font-family": "Segoe UI, sans-serif", "font-variant-numeric": "tabular-nums"
+      }, `${h}m`));
+    });
+
+    // Interactive Crosshair & Tooltip
+    const cross = svgEl("line", {
+      x1: padL, y1: padT, x2: padL, y2: padT + plotH,
+      stroke: COLORS.navy, "stroke-width": 0.9, "stroke-dasharray": "3,2",
+      style: "display:none; pointer-events:none;"
+    });
+    svg.appendChild(cross);
+    const hit = svgEl("rect", {
+      x: padL, y: padT, width: plotW, height: plotH,
+      fill: "transparent", style: "cursor:crosshair;"
+    });
+    const tt = $("alphaDecayTooltip");
+    hit.addEventListener("mousemove", evt => {
+      const rect = svg.getBoundingClientRect();
+      const sx = ((evt.clientX - rect.left) / rect.width) * W;
+      const targetH = minH + clamp((sx - padL) / plotW, 0, 1) * (maxH - minH);
+      let nearest = pts[0];
+      let bestDist = Infinity;
+      for (const p of pts) {
+        const d = Math.abs(p.horizon_min - targetH);
+        if (d < bestDist) { bestDist = d; nearest = p; }
+      }
+      const cx = xOf(nearest.horizon_min);
+      cross.style.display = "block";
+      cross.setAttribute("x1", cx);
+      cross.setAttribute("x2", cx);
+      if (tt) {
+        tt.innerHTML = `
+          <div class="tt-head">
+            <span class="tt-time">Horizon: ${nearest.horizon_min} min</span>
+            <span class="tt-px num">${nearest.in_sweet_spot ? "5–20m Zone" : "Outer"}</span>
+          </div>
+          <div class="tt-grid num">
+            <span class="tt-k">OU-Spectral VPIN</span><span class="tt-v">${fmtSigned(nearest.ou_spectral_vpin_net_bps, 2)} bp (${fmt(nearest.ou_spectral_vpin_hit_pct, 1)}%)</span>
+            <span class="tt-k">Adaptive Blend</span><span class="tt-v">${fmtSigned(nearest.adaptive_blend_net_bps, 2)} bp (${fmt(nearest.adaptive_blend_hit_pct, 1)}%)</span>
+            <span class="tt-k">8m Single</span><span class="tt-v">${fmtSigned(nearest.single_8m_net_bps, 2)} bp (${fmt(nearest.single_8m_hit_pct, 1)}%)</span>
+          </div>
+        `;
+        tt.classList.add("visible");
+        tt.style.top = "12px";
+        tt.style.left = nearest.horizon_min > 15 ? "54px" : "auto";
+        tt.style.right = nearest.horizon_min > 15 ? "auto" : "24px";
+      }
+    });
+    hit.addEventListener("mouseleave", () => {
+      cross.style.display = "none";
+      if (tt) tt.classList.remove("visible");
+    });
+    svg.appendChild(hit);
+  }
+
+  function renderWalkForwardTable() {
+    const tbody = $("walkForwardBody");
+    if (!tbody) return;
+    clearEl(tbody);
+
+    const rl = RAW_METRICS && RAW_METRICS.research_lab;
+    const wf = rl && rl.walk_forward_dsr;
+    if (!wf || !Array.isArray(wf.models)) {
+      tbody.innerHTML = `<tr><td colspan="8" class="center" style="padding:18px; color:#526D8F;">Awaiting Purged Walk-Forward &amp; DSR benchmark in data/bundle.js…</td></tr>`;
+      return;
+    }
+
+    if (wf.split && $("wfMetaSubtitle")) {
+      $("wfMetaSubtitle").textContent =
+        `IS ${wf.split.is_sessions} vs OOS ${wf.split.oos_sessions} · Deflated Sharpe (M=${wf.split.trials_m}, SR*=${fmt(wf.split.sr_benchmark_m16, 2)})`;
+    }
+    const ou1x = wf.ou_spectral_1x;
+    if (ou1x && $("wfRetentionBadge")) {
+      $("wfRetentionBadge").textContent = `OU OOS SR ${fmt(ou1x.oos_sharpe, 2)} · DSR ${fmt(ou1x.dsr_pct, 2)}%`;
+    }
+
+    for (const m of wf.models) {
+      const tr = document.createElement("tr");
+      if (m.is_frontier) tr.classList.add("flagship-row");
+      const isTurbo = /turbo/i.test(m.id || m.name);
+      const badge = m.is_frontier
+        ? `<span class="${isTurbo ? "flagship-badge" : "kpi-tag"}" style="margin-left:5px;">${isTurbo ? "TURBO" : "FRONTIER"}</span>`
+        : "";
+      const retCls = Number(m.oos_retention_pct) >= 85 ? "pnl-pos" : "";
+      const dsrCls = Number(m.dsr_pct) >= 75 ? "pnl-pos" : "";
+
+      tr.innerHTML = `
+        <td class="left">${m.name}${badge}</td>
+        <td class="num">${fmt(m.is_sharpe, 2)}</td>
+        <td class="num" style="font-weight:700; color:#0B1F3A;">${fmt(m.oos_sharpe, 2)}</td>
+        <td class="num ${Number(m.oos_annual_return_pct) >= 0 ? "pnl-pos" : "pnl-neg"}">${fmtSigned(m.oos_annual_return_pct, 1)}%</td>
+        <td class="num">${fmtSigned(m.vwap_slippage_saved_bps, 2)} bp</td>
+        <td class="num">${fmt(m.psr_pct, 2)}%</td>
+        <td class="num ${dsrCls}">${fmt(m.dsr_pct, 2)}%</td>
+        <td class="num ${retCls}">${fmt(m.oos_retention_pct, 1)}%</td>
+      `;
+      tbody.appendChild(tr);
+    }
+  }
+
+  function renderStressMatrix() {
+    const grid = $("stressMatrixGrid");
+    if (!grid) return;
+    clearEl(grid);
+
+    const rl = RAW_METRICS && RAW_METRICS.research_lab;
+    const scenarios = rl && Array.isArray(rl.stress_tests) ? rl.stress_tests : null;
+    if (!scenarios || scenarios.length === 0) {
+      grid.innerHTML = `<div style="grid-column:1/-1; text-align:center; padding:18px; color:#526D8F; font-style:italic;">Awaiting 4-scenario adversarial stress suite in data/bundle.js…</div>`;
+      return;
+    }
+
+    const modelOrder = [
+      { key: "single_8m",        short: "8m Single",   color: "#94B6DA" },
+      { key: "adaptive_1x",      short: "Adaptive 1\u00D7", color: "#3B76C4" },
+      { key: "ou_spectral_1x",   short: "OU-VPIN 1\u00D7",  color: "#1B4F9C" },
+      { key: "ou_spectral_turbo", short: "OU Turbo",   color: "#0B1F3A" }
+    ];
+
+    for (const sc of scenarios) {
+      const modelsObj = sc.models || {};
+      const sharpes = modelOrder.map(m => Math.abs(Number((modelsObj[m.key] && modelsObj[m.key].net_sharpe) || 0)));
+      const maxAbsSr = Math.max(2.0, ...sharpes);
+
+      const card = document.createElement("div");
+      card.className = `stress-card${sc.id === "momentum_meltup" ? " stress-toxic" : ""}`;
+
+      const barsHtml = modelOrder.map(m => {
+        const d = modelsObj[m.key] || { net_sharpe: 0, max_drawdown_pct: 0 };
+        const sr = Number(d.net_sharpe || 0);
+        const mdd = Math.abs(Number(d.max_drawdown_pct || 0));
+        const halfPct = clamp((Math.abs(sr) / maxAbsSr) * 50, 2.5, 50);
+        const isNeg = sr < 0;
+        const leftPos = isNeg ? (50 - halfPct) : 50;
+        return `
+          <div class="stress-bar-row num">
+            <span class="stress-model-lbl">${m.short}</span>
+            <span class="stress-track"><i class="stress-zero"></i><div class="stress-fill${isNeg ? " neg" : ""}" style="left:${leftPos.toFixed(1)}%; width:${halfPct.toFixed(1)}%; background:${m.color};"></div></span>
+            <span class="stress-val ${isNeg ? "pnl-neg" : "pnl-pos"}">${fmtSigned(sr, 2)} <small>(-${fmt(mdd, 1)}%)</small></span>
+          </div>
+        `;
+      }).join("");
+
+      card.innerHTML = `
+        <div class="stress-head">
+          <span class="stress-title">${sc.label}</span>
+          <span class="stress-shock-tag num">seed ${sc.seed}</span>
+        </div>
+        <div class="stress-desc">${sc.description}</div>
+        <div class="stress-bars">${barsHtml}</div>
+        <div class="stress-foot num">
+          <span>VPIN <strong>${fmt(sc.vpin_mean, 2)}</strong> · H&#770; <strong>${fmt(sc.hurst_mean, 2)}</strong></span>
+          <span><strong>${fmtInt(sc.toxic_vetoes)}</strong> toxic vetoes</span>
+        </div>
+      `;
+      grid.appendChild(card);
+    }
+  }
+
+  function renderResearchTab() {
+    if (!RAW_SESSION) return;
+    runMultiAssetRadarScan();
+    renderRadarTable();
+    renderTermStructureChart();
+    renderAlphaDecayChart();
+    renderWalkForwardTable();
+    renderStressMatrix();
+  }
+
+  /* ---------- Tab 4: Editorial Blue Sheet Page 1 / Page 2 Switcher ---------- */
+  function switchSheetPage(pageNum) {
+    const p = String(pageNum) === "2" ? "2" : "1";
+    state.sheetPage = p;
+    const src = p === "2" ? "research_brief.html" : "blue_sheet.html";
+    const frame = $("blueSheetFrame");
+    if (frame && frame.getAttribute("src") !== src) {
+      frame.setAttribute("src", src);
+    }
+    const openLink = $("btnOpenFullSheet");
+    if (openLink) openLink.setAttribute("href", src);
+
+    if ($("sheetToolbarTitle")) {
+      $("sheetToolbarTitle").textContent = p === "2"
+        ? "Publication Broadsheet — Spectral VWAP: OU Half-Life, Curvature & Toxicity Gating (Page 2)"
+        : "Publication Broadsheet — Map of Blended 5–20m VWAP (Page 1)";
+    }
+    if ($("sheetToolbarSub")) {
+      $("sheetToolbarSub").textContent = p === "2"
+        ? "Companion IEEE Quant Blue research brief · Equations (3)–(4), Walk-Forward DSR & Stress Matrix"
+        : "Single-page Letter layout powered by identical quantitative bundle";
+    }
+    document.querySelectorAll("#sheetPageSwitcher .sheet-page-btn").forEach(btn => {
+      btn.classList.toggle("active", btn.dataset.page === p);
+    });
+    try {
+      const url = new URL(window.location.href);
+      if (state.activeTab === "sheet") {
+        if (p === "2") url.searchParams.set("page", "2");
+        else url.searchParams.delete("page");
+        window.history.replaceState({}, "", url.toString());
+      }
+    } catch (_err) {}
+  }
+
   /* ---------- Tab & Event Wiring ---------- */
   function switchTab(tabName) {
-    const valid = ["lab", "attribution", "sheet"];
+    const valid = ["lab", "attribution", "research", "sheet"];
     const target = valid.includes(tabName) ? tabName : "lab";
     state.activeTab = target;
 
@@ -2976,9 +4011,14 @@
       panel.classList.toggle("active", panel.id === `panel-${target}`);
     });
 
+    if (target === "research" && RAW_SESSION) {
+      renderResearchTab();
+    }
+
     try {
       const url = new URL(window.location.href);
       url.searchParams.set("tab", target);
+      if (target !== "sheet") url.searchParams.delete("page");
       window.history.replaceState({}, "", url.toString());
     } catch (_err) {
       // Ignore history restriction on local file:/// if browser blocks query updates
@@ -3012,9 +4052,10 @@
 
     $("btnQuickSheet").addEventListener("click", () => switchTab("sheet"));
 
-    // Print Blue Sheet button
+    // Print Blue Sheet button (prints active page 1 or page 2)
     $("btnPrintSheet").addEventListener("click", () => {
       const frame = $("blueSheetFrame");
+      const activeSrc = state.sheetPage === "2" ? "research_brief.html" : "blue_sheet.html";
       try {
         if (frame && frame.contentWindow) {
           frame.contentWindow.focus();
@@ -3024,7 +4065,34 @@
       } catch (_err) {
         // Fallback if file:/// blocks cross-frame print
       }
-      window.open("blue_sheet.html", "_blank", "noopener");
+      window.open(activeSrc, "_blank", "noopener");
+    });
+
+    // Editorial Blue Sheet Page 1 / Page 2 Switcher
+    document.querySelectorAll("#sheetPageSwitcher .sheet-page-btn").forEach(btn => {
+      btn.addEventListener("click", () => switchSheetPage(btn.dataset.page));
+    });
+
+    // Tab 3 Deep Research Radar controls
+    const btnRescan = $("btnRescanRadar");
+    if (btnRescan) {
+      btnRescan.addEventListener("click", () => {
+        runMultiAssetRadarScan();
+        renderRadarTable();
+        renderTermStructureChart();
+      });
+    }
+    document.querySelectorAll("#radarTable thead th.sortable").forEach(th => {
+      th.addEventListener("click", () => {
+        const key = th.dataset.rsort;
+        if (state.radarSortKey === key) {
+          state.radarSortDir = state.radarSortDir === "desc" ? "asc" : "desc";
+        } else {
+          state.radarSortKey = key;
+          state.radarSortDir = key === "symbol" ? "asc" : "desc";
+        }
+        renderRadarTable();
+      });
     });
 
     // Symbol input, chips & CSV import
@@ -3152,8 +4220,8 @@
     const sliderIds = ["sliderW5", "sliderW10", "sliderW15", "sliderW20"];
     sliderIds.forEach((id, idx) => {
       $(id).addEventListener("input", evt => {
-        // If user starts dragging from Adaptive mode, seed from current displayed values
-        if (state.preset === "adaptive") {
+        // If user starts dragging from Adaptive or OU-Spectral mode, seed from current displayed values
+        if (PRESETS[state.preset] && PRESETS[state.preset].dynamic) {
           state.weights = sliderIds.map(sid => Number($(sid).value));
         }
         state.weights = normalizeIntegerWeights(state.weights, idx, Number(evt.target.value));
@@ -3261,6 +4329,7 @@
     const preset = params.get("preset");
     const sym = params.get("symbol");
     const turbo = params.get("turbo");
+    const page = params.get("page");
     if (zoom && ["spotlight", "full", "open", "midday", "close"].includes(zoom)) {
       state.zoom = zoom;
     }
@@ -3272,6 +4341,9 @@
     }
     if (turbo === "1" || turbo === "true") {
       state.turboMode = true;
+    }
+    if (page === "2") {
+      state.sheetPage = "2";
     }
     return tab;
   }
@@ -3289,11 +4361,14 @@
     RAW_METRICS = window.VWAP_DATA.metrics;
     RAW_SESSION = window.VWAP_DATA.session;
     BENCHMARK_SESSION = window.VWAP_DATA.session;
+    if (BENCHMARK_SESSION && Array.isArray(BENCHMARK_SESSION.bars)) {
+      enrichPhase2Microstructure(BENCHMARK_SESSION.bars, true);
+    }
 
     // Sync topbar metadata from engine meta
     const meta = RAW_METRICS.meta || {};
     if (meta.sessions && meta.total_bars) {
-      $("topbarMeta").textContent = `${meta.sessions} Sessions · ${fmtInt(meta.total_bars)} Bars · 5–20m`;
+      $("topbarMeta").textContent = `${meta.sessions} Sessions · ${fmtInt(meta.total_bars)} Bars`;
     }
 
     // Calibrate default entryZ & maxHold from session metadata if exported (flagship engine default is 1.58 / 20m)
@@ -3340,6 +4415,8 @@
     renderDurationChart();
     renderBenchmarkTable();
     renderTurboBanner();
+    renderResearchTab();
+    switchSheetPage(state.sheetPage);
 
     if (new URLSearchParams(window.location.search).get("live") === "1") {
       startLiveStream();

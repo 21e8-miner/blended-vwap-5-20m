@@ -1,0 +1,1500 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Spectral VWAP: OU Half-Life, Curvature &amp; Toxicity Gating</title>
+  <style>
+    :root {
+      --navy: #0B1F3A;
+      --cobalt: #1B4F9C;
+      --steel: #3B76C4;
+      --cerulean: #68A3DF;
+      --ice: #EDF4FC;
+      --ice-soft: #F6FAFF;
+      --grid: #B8CEE8;
+      --slate: #3A5373;
+      --ink: #12243B;
+      --paper: #FFFFFF;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    html, body {
+      background: var(--paper);
+      color: var(--ink);
+      font-family: "Times New Roman", Cambria, Georgia, serif;
+      -webkit-font-smoothing: antialiased;
+      -webkit-print-color-adjust: exact;
+      print-color-adjust: exact;
+    }
+
+    body {
+      display: flex;
+      justify-content: center;
+      align-items: flex-start;
+      min-height: 100vh;
+    }
+
+    .sheet {
+      width: 1100px;
+      height: 1424px;
+      background: var(--paper);
+      padding: 26px 44px 28px 44px;
+      overflow: hidden;
+      position: relative;
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* Subtle IEEE Running Header connecting Page 2 to Page 1 */
+    .running-folio {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 10.6px;
+      font-variant: small-caps;
+      letter-spacing: 0.08em;
+      color: var(--slate);
+      border-bottom: 0.75px solid var(--grid);
+      padding-bottom: 4px;
+      margin-bottom: 10px;
+    }
+
+    .running-folio .folio-right {
+      color: var(--cobalt);
+      font-weight: 700;
+    }
+
+    /* Header */
+    .sheet-header {
+      text-align: center;
+      margin-bottom: 12px;
+    }
+
+    .sheet-title {
+      font-size: 32px;
+      font-weight: 700;
+      line-height: 1.1;
+      letter-spacing: -0.01em;
+      color: var(--navy);
+      margin-bottom: 6px;
+      white-space: nowrap;
+    }
+
+    .sheet-subtitle {
+      font-size: 15.5px;
+      font-style: italic;
+      font-weight: 400;
+      color: var(--slate);
+      line-height: 1.24;
+    }
+
+    /* Dual-Panel Hero Figure (Fig. 2) */
+    .hero-figure {
+      width: 100%;
+      margin-bottom: 14px;
+    }
+
+    .hero-svg-wrap {
+      width: 100%;
+      line-height: 0;
+    }
+
+    #fig2-svg {
+      width: 100%;
+      height: auto;
+      display: block;
+      overflow: visible;
+    }
+
+    .fig-caption {
+      margin-top: 6px;
+      font-size: 12.5px;
+      line-height: 1.33;
+      color: var(--ink);
+      text-align: justify;
+      hyphens: auto;
+    }
+
+    .fig-caption .fig-label {
+      color: var(--navy);
+      font-weight: 700;
+    }
+
+    /* Two-column IEEE body */
+    .columns {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      column-gap: 30px;
+      align-items: start;
+      flex: 1 1 auto;
+    }
+
+    .col {
+      min-width: 0;
+    }
+
+    /* Section & Subsection headings */
+    h2.sec-head {
+      text-align: center;
+      font-size: 14px;
+      font-weight: 700;
+      font-variant: small-caps;
+      letter-spacing: 0.04em;
+      color: var(--navy);
+      margin-top: 8px;
+      margin-bottom: 5px;
+      line-height: 1.2;
+    }
+
+    .col > h2.sec-head:first-child {
+      margin-top: 0;
+    }
+
+    h3.sub-head {
+      font-size: 13.3px;
+      font-weight: 400;
+      font-style: italic;
+      color: var(--cobalt);
+      margin-top: 7px;
+      margin-bottom: 2px;
+      line-height: 1.24;
+    }
+
+    p.body-p {
+      font-size: 13.2px;
+      line-height: 1.34;
+      color: var(--ink);
+      text-align: justify;
+      text-indent: 1.25em;
+      margin-bottom: 5px;
+    }
+
+    p.body-p.no-indent {
+      text-indent: 0;
+    }
+
+    /* Publication-grade Math Equations */
+    .eq-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin: 7px 0 8px 0;
+      padding: 2px 0;
+    }
+
+    .eq-spacer {
+      width: 24px;
+      flex: 0 0 24px;
+    }
+
+    .eq-body {
+      flex: 1 1 auto;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-family: "Cambria Math", "Times New Roman", serif;
+      font-size: 16.5px;
+      color: var(--navy);
+      line-height: 1.1;
+      gap: 4px;
+    }
+
+    .eq-body.eq4-stack {
+      flex-direction: column;
+      gap: 6px;
+      font-size: 16px;
+    }
+
+    .eq-line {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 4px;
+      white-space: nowrap;
+    }
+
+    .eq-num {
+      width: 24px;
+      flex: 0 0 24px;
+      text-align: right;
+      font-family: "Times New Roman", serif;
+      font-size: 14.5px;
+      color: var(--cobalt);
+      font-weight: 400;
+    }
+
+    .m-it { font-style: italic; }
+    .m-rm { font-style: normal; }
+    .m-bf { font-weight: 700; font-style: normal; }
+
+    .m-sub {
+      font-size: 0.66em;
+      vertical-align: -0.24em;
+      line-height: 0;
+    }
+
+    .m-sup {
+      font-size: 0.64em;
+      vertical-align: 0.44em;
+      line-height: 0;
+    }
+
+    .m-atom {
+      display: inline-block;
+      white-space: nowrap;
+      text-indent: 0;
+    }
+
+    .m-hat,
+    .m-hat-cap {
+      position: relative;
+      display: inline-block;
+      font-style: italic;
+      text-indent: 0;
+    }
+
+    .m-hat::after {
+      content: "\02C6";
+      position: absolute;
+      top: 0.04em;
+      left: 52%;
+      transform: translateX(-50%);
+      font-style: normal;
+      font-size: 0.84em;
+      line-height: 1;
+      pointer-events: none;
+    }
+
+    .m-hat-cap::after {
+      content: "\02C6";
+      position: absolute;
+      top: -0.18em;
+      left: 54%;
+      transform: translateX(-50%);
+      font-style: normal;
+      font-size: 0.82em;
+      line-height: 1;
+      pointer-events: none;
+    }
+
+    .m-subsup {
+      display: inline-flex;
+      flex-direction: column;
+      align-items: flex-start;
+      justify-content: center;
+      line-height: 0.88;
+      margin-left: 1px;
+      vertical-align: middle;
+      text-indent: 0;
+    }
+
+    .m-subsup .sup-t {
+      font-size: 0.56em;
+      font-style: normal;
+      margin-bottom: 1px;
+    }
+
+    .m-subsup .sub-t {
+      font-size: 0.60em;
+      font-style: italic;
+    }
+
+    .m-frac {
+      display: inline-flex;
+      flex-direction: column;
+      align-items: center;
+      vertical-align: middle;
+      margin: 0 2px;
+      font-size: 0.88em;
+    }
+
+    .m-frac .m-num {
+      padding: 0 6px 3px 6px;
+      border-bottom: 1.2px solid var(--navy);
+      white-space: nowrap;
+      display: inline-flex;
+      align-items: center;
+    }
+
+    .m-frac .m-den {
+      padding: 3px 6px 0 6px;
+      white-space: nowrap;
+      display: inline-flex;
+      align-items: center;
+    }
+
+    .m-frac-sm {
+      display: inline-flex;
+      flex-direction: column;
+      align-items: center;
+      vertical-align: middle;
+      margin: 0 1px;
+      font-size: 0.82em;
+    }
+
+    .m-frac-sm .m-num {
+      padding: 0 3px 1.5px 3px;
+      border-bottom: 1px solid var(--navy);
+      white-space: nowrap;
+      display: block;
+    }
+
+    .m-frac-sm .m-den {
+      padding: 1.5px 3px 0 3px;
+      white-space: nowrap;
+      display: block;
+    }
+
+    .m-bar {
+      display: inline-block;
+      border-top: 1px solid var(--navy);
+      line-height: 0.92;
+      padding-top: 0.5px;
+    }
+
+    .m-paren {
+      font-size: 1.55em;
+      font-weight: 300;
+      line-height: 0.85;
+      color: var(--navy);
+      margin: 0 1px;
+    }
+
+    .m-comma-cond {
+      font-size: 0.74em;
+      color: var(--slate);
+      margin-left: -2px;
+      white-space: nowrap;
+    }
+
+    /* Booktabs Tables II & III */
+    .table-wrap {
+      margin-bottom: 16px;
+    }
+
+    .table-title-num {
+      text-align: center;
+      font-size: 12.6px;
+      font-variant: small-caps;
+      letter-spacing: 0.06em;
+      color: var(--navy);
+      line-height: 1.2;
+    }
+
+    .table-title-cap {
+      text-align: center;
+      font-size: 11.7px;
+      font-variant: small-caps;
+      letter-spacing: 0.035em;
+      color: var(--slate);
+      margin-bottom: 5px;
+      line-height: 1.22;
+    }
+
+    table.booktabs {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 11.6px;
+      line-height: 1.28;
+      font-variant-numeric: tabular-nums;
+      color: var(--ink);
+    }
+
+    table.booktabs thead tr {
+      border-top: 1.8px solid var(--navy);
+      border-bottom: 0.9px solid var(--cobalt);
+    }
+
+    table.booktabs th {
+      padding: 3.6px 3.5px;
+      font-weight: 700;
+      color: var(--navy);
+      text-align: left;
+      white-space: nowrap;
+    }
+
+    table.booktabs th.num,
+    table.booktabs td.num {
+      text-align: right;
+    }
+
+    table.booktabs td {
+      padding: 2.8px 3.5px;
+      vertical-align: middle;
+      white-space: nowrap;
+    }
+
+    table.booktabs tbody tr.row-highlight {
+      background: var(--ice);
+      font-weight: 700;
+      color: var(--navy);
+    }
+
+    table.booktabs tbody tr.row-highlight td:first-child {
+      box-shadow: inset 2.5px 0 0 var(--cobalt);
+      padding-left: 6px;
+      color: var(--navy);
+    }
+
+    table.booktabs tbody tr.row-frontier td:first-child {
+      color: var(--cobalt);
+      font-weight: 700;
+    }
+
+    table.booktabs tbody tr.row-turbo {
+      background: var(--ice-soft);
+      font-weight: 700;
+      color: var(--navy);
+    }
+
+    table.booktabs tbody tr.row-turbo td:first-child {
+      box-shadow: inset 2.5px 0 0 var(--navy);
+      padding-left: 6px;
+      color: var(--navy);
+    }
+
+    table.booktabs tfoot tr {
+      border-top: 0.9px solid #7BA3D1;
+      border-bottom: 1.8px solid var(--navy);
+      font-weight: 700;
+      color: var(--navy);
+    }
+
+    table.booktabs tfoot td {
+      padding: 3.6px 3.5px;
+    }
+
+    .mdd-sub {
+      font-size: 10.3px;
+      font-weight: 400;
+      color: var(--slate);
+      margin-left: 2px;
+    }
+
+    .neg-val {
+      color: #5C6F88;
+    }
+
+    .pos-strong {
+      color: var(--navy);
+      font-weight: 700;
+    }
+
+    .table-note {
+      margin-top: 3px;
+      font-size: 10.7px;
+      font-style: italic;
+      color: var(--slate);
+      line-height: 1.25;
+      text-align: left;
+    }
+
+    /* Section VI + Aphorism */
+    .insights-block {
+      margin-top: 10px;
+    }
+
+    .aphorism {
+      margin-top: 20px;
+      text-align: center;
+      font-size: 13.5px;
+      font-style: italic;
+      line-height: 1.38;
+      color: var(--cobalt);
+      padding: 0 10px;
+    }
+
+    .data-error {
+      border: 1.5px solid #B91C1C;
+      background: #FEF2F2;
+      color: #991B1B;
+      padding: 12px 16px;
+      font-size: 14px;
+      margin: 12px 0;
+      display: none;
+    }
+
+    @page {
+      size: 8.5in 11in;
+      margin: 0;
+    }
+
+    @media print {
+      html, body {
+        width: 8.5in;
+        height: 11in;
+        margin: 0;
+        padding: 0;
+        background: #FFFFFF;
+        overflow: hidden;
+      }
+
+      body {
+        display: block;
+      }
+
+      .sheet {
+        width: 1100px;
+        height: 1424px;
+        zoom: 0.7415;
+        margin: 0;
+        page-break-after: avoid;
+        break-after: avoid;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main class="sheet" id="sheet-root">
+    <div class="running-folio">
+      <span>Blended 5&ndash;20m VWAP &middot; Companion Research Brief</span>
+      <span class="folio-right">Page 2 &middot; OU-Spectral &amp; Toxicity Gating</span>
+    </div>
+
+    <header class="sheet-header">
+      <h1 class="sheet-title">Spectral VWAP: OU Half-Life, Curvature &amp; Toxicity Gating</h1>
+      <p class="sheet-subtitle">
+        Volume-clock Ornstein&ndash;Uhlenbeck horizon kernels, Nelson&ndash;Siegel term-structure curvature, and VPIN&ndash;Hurst adverse-selection vetoes.
+      </p>
+    </header>
+
+    <div class="data-error" id="data-error">
+      Waiting for <code>../data/bundle.js</code> (<code>window.VWAP_DATA.metrics.research_lab</code>). Run <code>engine/run_pipeline.py</code> first.
+    </div>
+
+    <figure class="hero-figure">
+      <div class="hero-svg-wrap">
+        <svg id="fig2-svg" viewBox="0 0 1012 372" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Alpha Decay Frontier and Adversarial Microstructure Stress Matrix"></svg>
+      </div>
+      <figcaption class="fig-caption" id="fig2-caption">
+        <span class="fig-label">Fig. 2.</span> Loading dual-panel research figure caption...
+      </figcaption>
+    </figure>
+
+    <section class="columns">
+      <!-- LEFT COLUMN -->
+      <div class="col col-left">
+        <h2 class="sec-head">IV. Volume-Clock OU Kernel &amp; Curvature</h2>
+
+        <h3 class="sub-head">A. Ornstein&ndash;Uhlenbeck Spectral Horizon Kernel</h3>
+        <p class="body-p" id="sec4a-lead">
+          Rather than assigning fixed weights or heuristic volume tilts, we estimate the local mean-reversion half-life
+          <span class="m-atom"><span class="m-hat">&tau;</span><span class="m-sub">1/2</span>(<span class="m-it">t</span>)</span> causally from a trailing 30-bar
+          AR(1) in volume time <span class="m-atom"><span class="m-it">d&tau;</span><span class="m-sub m-it">V</span></span> = rel_vol<span class="m-sub m-it">t</span>,
+          centering a log-Gaussian spectral kernel over <span class="m-it">h</span> &isin; {5, 10, 15, 20} min:
+        </p>
+
+        <div class="eq-row" aria-label="Equation 3: OU-Spectral Horizon Kernel">
+          <span class="eq-spacer"></span>
+          <div class="eq-body">
+            <span class="m-atom"><span class="m-it">w</span><span class="m-subsup"><span class="sup-t">OU</span><span class="sub-t">h</span></span>(<span class="m-it">t</span>)</span>
+            <span>=</span>
+            <span class="m-frac">
+              <span class="m-num">
+                <span>exp</span><span class="m-paren">(</span><span>&minus;</span>
+                <span class="m-frac-sm">
+                  <span class="m-num">(ln&thinsp;<span class="m-it">h</span> &minus; ln&thinsp;<span class="m-hat">&tau;</span><span class="m-sub">1/2</span>(<span class="m-it">t</span>))<span class="m-sup">2</span></span>
+                  <span class="m-den">2<span class="m-it">&gamma;</span><span class="m-sup">2</span></span>
+                </span>
+                <span class="m-paren">)</span>
+              </span>
+              <span class="m-den">
+                <span style="margin-right:3px;">&sum;<span class="m-sub"><span class="m-it">k</span>&isin;<span class="m-it">H</span></span></span><span>exp</span><span class="m-paren">(</span><span>&minus;</span>
+                <span class="m-frac-sm">
+                  <span class="m-num">(ln&thinsp;<span class="m-it">k</span> &minus; ln&thinsp;<span class="m-hat">&tau;</span><span class="m-sub">1/2</span>(<span class="m-it">t</span>))<span class="m-sup">2</span></span>
+                  <span class="m-den">2<span class="m-it">&gamma;</span><span class="m-sup">2</span></span>
+                </span>
+                <span class="m-paren">)</span>
+              </span>
+            </span>
+          </div>
+          <span class="eq-num">(3)</span>
+        </div>
+
+        <p class="body-p no-indent" id="sec4a-worked">
+          Loading OU kernel empirical behavior...
+        </p>
+
+        <h3 class="sub-head">B. Butterfly Curvature &amp; VPIN&ndash;Hurst Toxicity Gate</h3>
+        <p class="body-p">
+          Treating the 5m, 10m, and 20m VWAPs as a Nelson&ndash;Siegel intraday term structure yields standardized butterfly curvature
+          <span class="m-atom"><span class="m-it">C</span><span class="m-sub m-it">t</span></span>, paired with a causal bulk-volume VPIN and Lo&ndash;MacKinlay
+          variance-ratio Hurst veto <span class="m-atom"><span class="m-it">V</span><span class="m-subsup"><span class="sup-t">tox</span><span class="sub-t">t</span></span></span>:
+        </p>
+
+        <div class="eq-row" aria-label="Equation 4: Butterfly Curvature and VPIN-Hurst Gate">
+          <span class="eq-spacer"></span>
+          <div class="eq-body eq4-stack">
+            <div class="eq-line">
+              <span class="m-atom"><span class="m-it">C</span><span class="m-sub m-it">t</span></span>
+              <span>=</span>
+              <span class="m-frac">
+                <span class="m-num">
+                  <span class="m-atom"><span class="m-rm">VWAP</span><span class="m-subsup"><span class="sup-t">(5)</span><span class="sub-t">t</span></span></span>
+                  &thinsp;&minus;&thinsp;2&thinsp;<span class="m-atom"><span class="m-rm">VWAP</span><span class="m-subsup"><span class="sup-t">(10)</span><span class="sub-t">t</span></span></span>
+                  &thinsp;+&thinsp;<span class="m-atom"><span class="m-rm">VWAP</span><span class="m-subsup"><span class="sup-t">(20)</span><span class="sub-t">t</span></span></span>
+                </span>
+                <span class="m-den">
+                  <span class="m-atom"><span class="m-bar"><span class="m-it">&sigma;</span></span><span class="m-sub m-it">t</span></span>
+                </span>
+              </span>
+            </div>
+            <div class="eq-line" style="font-size: 14.8px;">
+              <span class="m-atom"><span class="m-it">V</span><span class="m-subsup"><span class="sup-t">tox</span><span class="sub-t">t</span></span></span>
+              <span>=</span>
+              <span class="m-atom"><span class="m-bf">1</span>[(VPIN<span class="m-sub m-it">t</span> &ge; 0.54 &and; <span class="m-hat-cap">H</span><span class="m-sub m-it">t</span> &ge; 0.54) &or; <span class="m-hat-cap">H</span><span class="m-sub m-it">t</span> &ge; 0.61]</span>
+            </div>
+          </div>
+          <span class="eq-num">(4)</span>
+        </div>
+
+        <p class="body-p no-indent" id="sec4b-worked">
+          Loading curvature and VPIN-Hurst gate behavior...
+        </p>
+
+        <h2 class="sec-head">V. Statistical Rigor &amp; Deflated Sharpe</h2>
+
+        <h3 class="sub-head">A. Purged Walk-Forward Validation</h3>
+        <p class="body-p" id="sec5a-body">Loading purged walk-forward analysis...</p>
+
+        <h3 class="sub-head">B. Multiple-Testing Deflation (DSR, M = 16)</h3>
+        <p class="body-p" id="sec5b-body">Loading DSR statistical rigor analysis...</p>
+
+        <h3 class="sub-head">C. Why 5&ndash;20m Dominates the Alpha Decay Curve</h3>
+        <p class="body-p" id="sec5c-body">Loading alpha decay curve insight...</p>
+      </div>
+
+      <!-- RIGHT COLUMN -->
+      <div class="col col-right">
+        <div class="table-wrap">
+          <div class="table-title-num">TABLE II</div>
+          <div class="table-title-cap" id="table2-cap">Purged Walk-Forward (IS vs OOS) &amp; Deflated Sharpe (M = 16)</div>
+          <table class="booktabs" id="table2">
+            <thead>
+              <tr>
+                <th>Strategy Model</th>
+                <th class="num">IS SR</th>
+                <th class="num">OOS SR</th>
+                <th class="num">Full SR</th>
+                <th class="num">PSR</th>
+                <th class="num">DSR</th>
+              </tr>
+            </thead>
+            <tbody id="table2-body"></tbody>
+            <tfoot id="table2-foot"></tfoot>
+          </table>
+          <div class="table-note" id="table2-note"></div>
+        </div>
+
+        <div class="table-wrap">
+          <div class="table-title-num">TABLE III</div>
+          <div class="table-title-cap">Adversarial Microstructure Stress Matrix &mdash; Net SR (MDD%)</div>
+          <table class="booktabs" id="table3">
+            <thead>
+              <tr>
+                <th>Hostile Regime</th>
+                <th class="num">8m Single</th>
+                <th class="num">Adapt. 1x</th>
+                <th class="num">OU-VPIN 1x</th>
+                <th class="num">OU-Turbo</th>
+              </tr>
+            </thead>
+            <tbody id="table3-body"></tbody>
+            <tfoot id="table3-foot"></tfoot>
+          </table>
+          <div class="table-note" id="table3-note"></div>
+        </div>
+
+        <div class="insights-block">
+          <h2 class="sec-head">VI. Stress-Tested Execution Lessons</h2>
+
+          <h3 class="sub-head">A. Toxicity Gating Halves Drawdown in Hostile Trends</h3>
+          <p class="body-p" id="sec6a-body">Loading stress lesson A...</p>
+
+          <h3 class="sub-head">B. Spectral Weighting Survives Crashes, Friction &amp; Lag</h3>
+          <p class="body-p" id="sec6b-body">Loading stress lesson B...</p>
+
+          <p class="aphorism">
+            Adaptation without toxicity gating harvests calm regimes and gives<br />
+            them back in trends; spectral gating knows when not to fade.
+          </p>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <script src="../data/bundle.js"></script>
+  <script>
+    (function () {
+      "use strict";
+
+      if (!window.VWAP_DATA || !window.VWAP_DATA.metrics || !window.VWAP_DATA.metrics.research_lab) {
+        document.getElementById("data-error").style.display = "block";
+        return;
+      }
+
+      const metrics = window.VWAP_DATA.metrics;
+      const metaBase = metrics.meta || {};
+      const rl = metrics.research_lab;
+      const rmeta = rl.meta || {};
+      const tele = rl.telemetry || {};
+      const wf = rl.walk_forward_dsr || {};
+      const wfSplit = wf.split || {};
+      const wfModels = wf.models || [];
+      const stressTests = rl.stress_tests || [];
+      const decay = rl.alpha_decay_curve || [];
+
+      const SVG_NS = "http://www.w3.org/2000/svg";
+
+      function el(tag, attrs, text) {
+        const node = document.createElementNS(SVG_NS, tag);
+        if (attrs) {
+          for (const [k, v] of Object.entries(attrs)) {
+            node.setAttribute(k, String(v));
+          }
+        }
+        if (text !== undefined && text !== null) {
+          node.textContent = String(text);
+        }
+        return node;
+      }
+
+      function fmt(v, d) {
+        return Number(v).toFixed(d);
+      }
+
+      function fmtSigned(v, d) {
+        const n = Number(v);
+        const s = Math.abs(n) < 1e-9 ? (0).toFixed(d) : n.toFixed(d);
+        return n > 1e-9 ? "+" + s : s;
+      }
+
+      function fmtInt(v) {
+        return Math.round(Number(v)).toLocaleString("en-US");
+      }
+
+      const byModelId = {};
+      wfModels.forEach((m) => { byModelId[m.id] = m; });
+      const m8 = byModelId.micro_8m_elastic_fade || wfModels[0];
+      const mStatic = byModelId.static_blend_5_20 || wfModels[1];
+      const mVol = byModelId.vol_weighted_blend_5_20 || wfModels[2];
+      const mAdapt = byModelId.adaptive_blend_5_20 || wfModels[3];
+      const mOu1x = wf.ou_spectral_1x || byModelId.ou_spectral_vpin_1x || wfModels[4];
+      const mOuTurbo = wf.ou_spectral_turbo || byModelId.ou_spectral_vpin_turbo || wfModels[5];
+
+      const stressById = {};
+      stressTests.forEach((s) => { stressById[s.id] = s; });
+
+      // =========================================================================
+      // 1. RENDER FIG. 2 (DUAL-PANEL HERO: ALPHA DECAY + ADVERSARIAL STRESS)
+      // =========================================================================
+      function renderFig2() {
+        const svg = document.getElementById("fig2-svg");
+        while (svg.firstChild) svg.removeChild(svg.firstChild);
+
+        const H = 372;
+
+        // -----------------------------------------------------------------------
+        // PANEL (a) LEFT: 5-20m Alpha Decay Frontier (1m to 30m)
+        // -----------------------------------------------------------------------
+        const pA = { x0: 54, x1: 484, y0: 52, y1: 330 };
+        const pAW = pA.x1 - pA.x0;
+        const pAH = pA.y1 - pA.y0;
+
+        // Panel (a) title & subtitle
+        svg.appendChild(el("text", {
+          x: (pA.x0 + pA.x1) / 2,
+          y: 16,
+          "text-anchor": "middle",
+          "font-family": "Times New Roman, serif",
+          "font-weight": "700",
+          "font-size": 13.8,
+          fill: "#0B1F3A",
+        }, "(a) Intraday Alpha Decay Frontier (1m\u201330m)"));
+
+        svg.appendChild(el("text", {
+          x: (pA.x0 + pA.x1) / 2,
+          y: 32,
+          "text-anchor": "middle",
+          "font-family": "Times New Roman, serif",
+          "font-style": "italic",
+          "font-size": 11.8,
+          fill: "#3A5373",
+        }, "Net forward edge (bps/trade) after spread & impact across holding horizons"));
+
+        // Scales for Panel (a)
+        const allDecayVals = [];
+        decay.forEach((d) => {
+          allDecayVals.push(d.ou_spectral_vpin_net_bps, d.adaptive_blend_net_bps, d.single_8m_net_bps);
+        });
+        const dMin = Math.floor((Math.min(...allDecayVals) - 0.15) * 2) / 2; // -1.0
+        const dMax = Math.ceil((Math.max(...allDecayVals) + 0.25) * 2) / 2;  // +2.5
+
+        const xMinH = 1;
+        const xMaxH = 30;
+        function xA(h) {
+          return pA.x0 + ((h - xMinH) / (xMaxH - xMinH)) * pAW;
+        }
+        function yA(v) {
+          return pA.y1 - ((v - dMin) / (dMax - dMin)) * pAH;
+        }
+
+        // Shaded 5-20m Sweet Spot band (Ice Blue #EDF4FC)
+        const ssX0 = xA(5);
+        const ssX1 = xA(20);
+        svg.appendChild(el("rect", {
+          x: ssX0,
+          y: pA.y0,
+          width: ssX1 - ssX0,
+          height: pAH,
+          fill: "#EDF4FC",
+        }));
+        svg.appendChild(el("text", {
+          x: (ssX0 + ssX1) / 2,
+          y: pA.y0 + 15,
+          "text-anchor": "middle",
+          "font-family": "Times New Roman, serif",
+          "font-style": "italic",
+          "font-weight": "700",
+          "font-size": 11.4,
+          fill: "#1B4F9C",
+        }, "5\u201320m Sweet Spot"));
+
+        // Horizontal gridlines + Y ticks for Panel (a)
+        for (let v = dMin; v <= dMax + 1e-6; v += 0.5) {
+          const tv = Math.round(v * 10) / 10;
+          const py = yA(tv);
+          const isZero = Math.abs(tv) < 1e-6;
+          svg.appendChild(el("line", {
+            x1: pA.x0,
+            y1: py,
+            x2: pA.x1,
+            y2: py,
+            stroke: isZero ? "#3A5373" : "#B8CEE8",
+            "stroke-width": isZero ? 1.15 : 0.85,
+            "stroke-dasharray": isZero ? "none" : "2.6,3.0",
+          }));
+          svg.appendChild(el("text", {
+            x: pA.x0 - 7,
+            y: py + 3.8,
+            "text-anchor": "end",
+            "font-family": "Times New Roman, serif",
+            "font-size": 11.5,
+            fill: isZero ? "#0B1F3A" : "#1E3554",
+            "font-weight": isZero ? "700" : "400",
+          }, fmtSigned(tv, 1)));
+        }
+
+        // Panel (a) L-axes
+        svg.appendChild(el("line", { x1: pA.x0, y1: pA.y0, x2: pA.x0, y2: pA.y1, stroke: "#0B1F3A", "stroke-width": 1.5 }));
+        svg.appendChild(el("line", { x1: pA.x0, y1: pA.y1, x2: pA.x1, y2: pA.y1, stroke: "#0B1F3A", "stroke-width": 1.5 }));
+
+        // Y-axis rotated label
+        const yALabY = (pA.y0 + pA.y1) / 2;
+        svg.appendChild(el("text", {
+          x: 13,
+          y: yALabY,
+          transform: `rotate(-90 13 ${yALabY})`,
+          "text-anchor": "middle",
+          "font-family": "Times New Roman, serif",
+          "font-style": "italic",
+          "font-size": 12.2,
+          fill: "#1E3554",
+        }, "Net Edge (bps / trade)"));
+
+        // X-axis ticks (1, 5, 10, 15, 20, 25, 30)
+        [1, 5, 10, 15, 20, 25, 30].forEach((h) => {
+          const px = xA(h);
+          svg.appendChild(el("line", {
+            x1: px,
+            y1: pA.y1,
+            x2: px,
+            y2: pA.y1 + 4,
+            stroke: "#0B1F3A",
+            "stroke-width": 1.1,
+          }));
+          svg.appendChild(el("text", {
+            x: px,
+            y: pA.y1 + 17,
+            "text-anchor": "middle",
+            "font-family": "Times New Roman, serif",
+            "font-size": 11.4,
+            fill: (h >= 5 && h <= 20) ? "#0B1F3A" : "#3A5373",
+            "font-weight": (h === 5 || h === 20) ? "700" : "400",
+          }, `${h}m`));
+        });
+
+        svg.appendChild(el("text", {
+          x: (pA.x0 + pA.x1) / 2,
+          y: pA.y1 + 33,
+          "text-anchor": "middle",
+          "font-family": "Times New Roman, serif",
+          "font-style": "italic",
+          "font-size": 11.6,
+          fill: "#3A5373",
+        }, "Forward Holding Horizon (minutes)"));
+
+        // Draw 3 curves: 8m Single (cerulean dashed), Adaptive Blend (cobalt solid), OU-Spectral VPIN (deep navy solid)
+        const seriesDefs = [
+          { key: "single_8m_net_bps", label: "8m Single", color: "#68A3DF", width: 1.75, dash: "4.5,3.0", r: 2.8 },
+          { key: "adaptive_blend_net_bps", label: "Adaptive Blend", color: "#3B76C4", width: 1.9, dash: "none", r: 3.0 },
+          { key: "ou_spectral_vpin_net_bps", label: "OU-Spectral VPIN", color: "#0B1F3A", width: 2.35, dash: "none", r: 3.4 },
+        ];
+
+        seriesDefs.forEach((s) => {
+          const pts = decay.map((d) => `${xA(d.horizon_min).toFixed(1)},${yA(d[s.key]).toFixed(1)}`).join(" ");
+          svg.appendChild(el("polyline", {
+            points: pts,
+            fill: "none",
+            stroke: s.color,
+            "stroke-width": s.width,
+            "stroke-dasharray": s.dash,
+            "stroke-linejoin": "round",
+            "stroke-linecap": "round",
+          }));
+          decay.forEach((d) => {
+            svg.appendChild(el("circle", {
+              cx: xA(d.horizon_min),
+              cy: yA(d[s.key]),
+              r: s.r,
+              fill: s.color,
+              stroke: "#FFFFFF",
+              "stroke-width": 0.7,
+            }));
+          });
+        });
+
+        // Highlight peak OU-Spectral point (18m, +1.44 bps) cleanly in wide-open air below the curve
+        const peakOu = decay.reduce((best, d) => (d.ou_spectral_vpin_net_bps > best.ou_spectral_vpin_net_bps ? d : best), decay[0]);
+        const peakOuX = xA(peakOu.horizon_min);
+        const peakOuY = yA(peakOu.ou_spectral_vpin_net_bps);
+        svg.appendChild(el("circle", {
+          cx: peakOuX,
+          cy: peakOuY,
+          r: 6.2,
+          fill: "none",
+          stroke: "#0B1F3A",
+          "stroke-width": 1.35,
+        }));
+        const calloutY = yA(0.55);
+        svg.appendChild(el("line", {
+          x1: peakOuX,
+          y1: peakOuY + 6.5,
+          x2: peakOuX,
+          y2: calloutY - 12,
+          stroke: "#0B1F3A",
+          "stroke-width": 0.9,
+          "stroke-dasharray": "2,2",
+        }));
+        svg.appendChild(el("text", {
+          x: peakOuX,
+          y: calloutY,
+          "text-anchor": "middle",
+          "font-family": "Times New Roman, serif",
+          "font-size": 10.6,
+          "font-weight": "700",
+          fill: "#0B1F3A",
+        }, `OU Peak +${fmt(peakOu.ou_spectral_vpin_net_bps, 2)} bps @ ${peakOu.horizon_min}m`));
+
+        // Clean "Sub-5m friction zone" annotation positioned cleanly inside open area above bottom axis
+        svg.appendChild(el("text", {
+          x: xA(5.4),
+          y: pA.y1 - 9,
+          "text-anchor": "start",
+          "font-family": "Times New Roman, serif",
+          "font-style": "italic",
+          "font-size": 10.3,
+          fill: "#3A5373",
+        }, "\u2190 Sub-5m friction zone"));
+
+        // Clean slim Panel (a) Legend placed cleanly below the 8m Single 25m dot (-0.28 bps)
+        const legA = { x: pA.x1 - 142, y: pA.y1 - 43 };
+        svg.appendChild(el("rect", {
+          x: legA.x - 6,
+          y: legA.y - 6,
+          width: 144,
+          height: 45,
+          fill: "#FFFFFF",
+          "fill-opacity": 0.94,
+          stroke: "#D4E3F5",
+          "stroke-width": 0.8,
+        }));
+        const legOrderA = [seriesDefs[2], seriesDefs[1], seriesDefs[0]];
+        legOrderA.forEach((s, idx) => {
+          const ly = legA.y + 3 + idx * 13.5;
+          svg.appendChild(el("line", {
+            x1: legA.x,
+            y1: ly,
+            x2: legA.x + 22,
+            y2: ly,
+            stroke: s.color,
+            "stroke-width": s.width,
+            "stroke-dasharray": s.dash,
+          }));
+          svg.appendChild(el("circle", {
+            cx: legA.x + 11,
+            cy: ly,
+            r: 2.4,
+            fill: s.color,
+          }));
+          svg.appendChild(el("text", {
+            x: legA.x + 27,
+            y: ly + 3.4,
+            "font-family": "Times New Roman, serif",
+            "font-size": 10.6,
+            "font-weight": idx === 0 ? "700" : "400",
+            fill: idx === 0 ? "#0B1F3A" : "#1E3554",
+          }, s.label));
+        });
+
+        // -----------------------------------------------------------------------
+        // PANEL (b) RIGHT: Adversarial Microstructure Stress Sharpe (4 Regimes)
+        // -----------------------------------------------------------------------
+        const pB = { x0: 562, x1: 1004, y0: 66, y1: 330 };
+        const pBW = pB.x1 - pB.x0;
+        const pBH = pB.y1 - pB.y0;
+
+        // Panel (b) title & subtitle
+        svg.appendChild(el("text", {
+          x: (pB.x0 + pB.x1) / 2,
+          y: 16,
+          "text-anchor": "middle",
+          "font-family": "Times New Roman, serif",
+          "font-weight": "700",
+          "font-size": 13.8,
+          fill: "#0B1F3A",
+        }, "(b) Adversarial Microstructure Stress Sharpe"));
+
+        svg.appendChild(el("text", {
+          x: (pB.x0 + pB.x1) / 2,
+          y: 32,
+          "text-anchor": "middle",
+          "font-family": "Times New Roman, serif",
+          "font-style": "italic",
+          "font-size": 11.8,
+          fill: "#3A5373",
+        }, `Net Sharpe across 4 unseen hostile regimes (${rmeta.stress_sessions_per_scenario || 20} sessions each)`));
+
+        // Clean horizontal legend strip right below Panel (b) subtitle (y = 48)
+        const barModels = [
+          { key: "single_8m", label: "8m Single", color: "#89B8E6", stroke: "#5B93CE" },
+          { key: "adaptive_1x", label: "Adaptive (1x)", color: "#3B76C4", stroke: "#1B4F9C" },
+          { key: "ou_spectral_1x", label: "OU-VPIN (1x)", color: "#1B4F9C", stroke: "#0B1F3A" },
+          { key: "ou_spectral_turbo", label: "OU-Turbo", color: "#0B1F3A", stroke: "#0B1F3A" },
+        ];
+        let lx = pB.x0 + 8;
+        barModels.forEach((bm) => {
+          svg.appendChild(el("rect", {
+            x: lx,
+            y: 44,
+            width: 10,
+            height: 10,
+            fill: bm.color,
+            stroke: bm.stroke,
+            "stroke-width": 0.7,
+          }));
+          svg.appendChild(el("text", {
+            x: lx + 14,
+            y: 52.5,
+            "font-family": "Times New Roman, serif",
+            "font-size": 10.9,
+            "font-weight": (bm.key === "ou_spectral_1x" || bm.key === "ou_spectral_turbo") ? "700" : "400",
+            fill: "#12243B",
+          }, bm.label));
+          lx += bm.label.length * 6.0 + 26;
+        });
+
+        // Compute Y scale for Panel (b)
+        const allStressSR = [];
+        stressTests.forEach((st) => {
+          barModels.forEach((bm) => allStressSR.push(st.models[bm.key].net_sharpe));
+        });
+        const sMin = Math.floor((Math.min(...allStressSR) - 2.5) / 5) * 5; // -20
+        const sMax = Math.ceil((Math.max(...allStressSR) + 2.5) / 5) * 5;  // +15 (or +10 -> let's give headroom for +8.56 label!)
+        const sMaxAdj = Math.max(sMax, 12);
+
+        function yB(v) {
+          return pB.y1 - ((v - sMin) / (sMaxAdj - sMin)) * pBH;
+        }
+        const yZeroB = yB(0);
+
+        // Subtle Ice Blue column backing for Momentum Melt-Up (index 1) spotlighting toxicity veto
+        const grpW = pBW / Math.max(1, stressTests.length);
+        const meltIdx = stressTests.findIndex((st) => st.id === "momentum_meltup");
+        if (meltIdx >= 0) {
+          svg.appendChild(el("rect", {
+            x: pB.x0 + meltIdx * grpW + 3,
+            y: pB.y0,
+            width: grpW - 6,
+            height: pBH,
+            fill: "#EDF4FC",
+          }));
+        }
+
+        // Horizontal gridlines & Y ticks for Panel (b)
+        for (let v = sMin; v <= sMaxAdj + 1e-6; v += 5) {
+          if (v > sMaxAdj) continue;
+          const py = yB(v);
+          const isZero = v === 0;
+          svg.appendChild(el("line", {
+            x1: pB.x0,
+            y1: py,
+            x2: pB.x1,
+            y2: py,
+            stroke: isZero ? "#0B1F3A" : "#B8CEE8",
+            "stroke-width": isZero ? 1.35 : 0.85,
+            "stroke-dasharray": isZero ? "none" : "2.6,3.0",
+          }));
+          svg.appendChild(el("text", {
+            x: pB.x0 - 7,
+            y: py + 3.8,
+            "text-anchor": "end",
+            "font-family": "Times New Roman, serif",
+            "font-size": 11.4,
+            fill: isZero ? "#0B1F3A" : "#1E3554",
+            "font-weight": isZero ? "700" : "400",
+          }, v > 0 ? `+${v}` : String(v)));
+        }
+
+        // Panel (b) L-axes
+        svg.appendChild(el("line", { x1: pB.x0, y1: pB.y0, x2: pB.x0, y2: pB.y1, stroke: "#0B1F3A", "stroke-width": 1.5 }));
+        svg.appendChild(el("line", { x1: pB.x0, y1: pB.y1, x2: pB.x1, y2: pB.y1, stroke: "#0B1F3A", "stroke-width": 1.5 }));
+
+        // Y-axis rotated label for Panel (b)
+        const yBLabY = (pB.y0 + pB.y1) / 2;
+        svg.appendChild(el("text", {
+          x: 520,
+          y: yBLabY,
+          transform: `rotate(-90 520 ${yBLabY})`,
+          "text-anchor": "middle",
+          "font-family": "Times New Roman, serif",
+          "font-style": "italic",
+          "font-size": 12.2,
+          fill: "#1E3554",
+        }, "Annualized Net Sharpe"));
+
+        // Short crisp x-axis labels for the 4 regimes
+        const shortStressLabels = {
+          flash_crash: ["Flash Crash", "2.8\u00d7 vol, -55% depth"],
+          momentum_meltup: ["Momentum Melt-Up", "toxic trend drift"],
+          cost_shock_2x: ["2\u00d7 Cost Shock", "2\u00d7 spread & impact"],
+          latency_lag_1m: ["+1m Latency Lag", "1-bar fill delay"],
+        };
+
+        // Grouped bars + crisp zero-overlap value labels
+        const barW = 20.5;
+        const barGap = 4;
+        const totalBarsW = barModels.length * barW + (barModels.length - 1) * barGap;
+
+        stressTests.forEach((st, gIdx) => {
+          const gCx = pB.x0 + (gIdx + 0.5) * grpW;
+          const startX = gCx - totalBarsW / 2;
+
+          // Subtle vertical divider between groups
+          if (gIdx > 0) {
+            svg.appendChild(el("line", {
+              x1: pB.x0 + gIdx * grpW,
+              y1: pB.y0,
+              x2: pB.x0 + gIdx * grpW,
+              y2: pB.y1,
+              stroke: "#E2ECF8",
+              "stroke-width": 0.9,
+            }));
+          }
+
+          barModels.forEach((bm, bIdx) => {
+            const val = st.models[bm.key].net_sharpe;
+            const bx = startX + bIdx * (barW + barGap);
+            const yVal = yB(val);
+            const rectY = Math.min(yVal, yZeroB);
+            const rectH = Math.max(1.5, Math.abs(yVal - yZeroB));
+
+            svg.appendChild(el("rect", {
+              x: bx,
+              y: rectY,
+              width: barW,
+              height: rectH,
+              fill: bm.color,
+              stroke: bm.stroke,
+              "stroke-width": 0.65,
+            }));
+
+            // Clean external labels above positive bars and below negative bars with micro-stagger if twin deep bars sit adjacent
+            let lblY = val >= 0
+              ? Math.max(pB.y0 + 10, rectY - 4)
+              : Math.min(pB.y1 - 4, rectY + rectH + 10.5);
+            if (st.id === "momentum_meltup" && bIdx === 1) {
+              lblY = Math.min(pB.y1 - 3, rectY + rectH + 19.5);
+              svg.appendChild(el("line", {
+                x1: bx + barW / 2,
+                y1: rectY + rectH + 1,
+                x2: bx + barW / 2,
+                y2: lblY - 8,
+                stroke: "#3B76C4",
+                "stroke-width": 0.75,
+              }));
+            }
+            const textFill = (bm.key === "ou_spectral_turbo" || bm.key === "ou_spectral_1x") ? "#0B1F3A" : "#3A5373";
+
+            svg.appendChild(el("text", {
+              x: bx + barW / 2,
+              y: lblY,
+              "text-anchor": "middle",
+              "font-family": "Times New Roman, serif",
+              "font-size": 9.2,
+              "font-weight": (bm.key === "ou_spectral_1x" || bm.key === "ou_spectral_turbo") ? "700" : "400",
+              fill: textFill,
+            }, fmtSigned(val, 1)));
+          });
+
+          // Veto count badge cleanly at top of each stress group
+          svg.appendChild(el("text", {
+            x: gCx,
+            y: pB.y0 + 12,
+            "text-anchor": "middle",
+            "font-family": "Times New Roman, serif",
+            "font-style": "italic",
+            "font-size": 9.9,
+            fill: "#1B4F9C",
+          }, `${st.toxic_vetoes} vetoes`));
+
+          // Two-line regime label below x-axis
+          const [l1, l2] = shortStressLabels[st.id] || [st.label, ""];
+          svg.appendChild(el("text", {
+            x: gCx,
+            y: pB.y1 + 16,
+            "text-anchor": "middle",
+            "font-family": "Times New Roman, serif",
+            "font-weight": "700",
+            "font-size": 11.1,
+            fill: "#0B1F3A",
+          }, l1));
+          svg.appendChild(el("text", {
+            x: gCx,
+            y: pB.y1 + 29,
+            "text-anchor": "middle",
+            "font-family": "Times New Roman, serif",
+            "font-style": "italic",
+            "font-size": 9.9,
+            fill: "#3A5373",
+          }, l2));
+        });
+      }
+
+      // =========================================================================
+      // 2. RENDER TABLE II (PURGED WALK-FORWARD IS vs OOS & DSR, M = 16)
+      // =========================================================================
+      function renderTable2() {
+        const tbody = document.getElementById("table2-body");
+        const tfoot = document.getElementById("table2-foot");
+        tbody.innerHTML = "";
+        tfoot.innerHTML = "";
+
+        const compactNames = {
+          micro_8m_elastic_fade: "8m Elastic Fade",
+          static_blend_5_20: "Static Blend 5\u201320m",
+          vol_weighted_blend_5_20: "Vol-Weighted Blend 5\u201320m",
+          adaptive_blend_5_20: "Adaptive Blend 5\u201320m (1x)",
+          ou_spectral_vpin_1x: "OU-Spectral Curv.-VPIN (1x)",
+          ou_spectral_vpin_turbo: "OU-Spectral Turbo (Maker+K)",
+        };
+
+        wfModels.forEach((m) => {
+          const tr = document.createElement("tr");
+          if (m.id === "ou_spectral_vpin_1x") tr.className = "row-highlight";
+          else if (m.id === "ou_spectral_vpin_turbo") tr.className = "row-turbo";
+          else if (m.family === "Blended 5\u201320m") tr.className = "row-frontier";
+
+          tr.innerHTML = `
+            <td>${compactNames[m.id] || m.name}</td>
+            <td class="num">${fmt(m.is_sharpe, 2)}</td>
+            <td class="num">${fmt(m.oos_sharpe, 2)}</td>
+            <td class="num">${fmt(m.full_sharpe, 2)}</td>
+            <td class="num">${fmt(m.psr_pct, 2)}%</td>
+            <td class="num">${fmt(m.dsr_pct, 2)}%</td>
+          `;
+          tbody.appendChild(tr);
+        });
+
+        const oosDeltaAdapt = mOu1x.oos_sharpe - mAdapt.oos_sharpe;
+        const fullDeltaAdapt = mOu1x.full_sharpe - mAdapt.full_sharpe;
+        const footTr = document.createElement("tr");
+        footTr.innerHTML = `
+          <td>OU-VPIN (1x) vs Adapt. (1x)</td>
+          <td class="num">${fmtSigned(mOu1x.is_sharpe - mAdapt.is_sharpe, 2)}</td>
+          <td class="num">${fmtSigned(oosDeltaAdapt, 2)}</td>
+          <td class="num">${fmtSigned(fullDeltaAdapt, 2)}</td>
+          <td class="num">${fmtSigned(mOu1x.psr_pct - mAdapt.psr_pct, 2)}%</td>
+          <td class="num">${fmtSigned(mOu1x.dsr_pct - mAdapt.dsr_pct, 2)}%</td>
+        `;
+        tfoot.appendChild(footTr);
+
+        document.getElementById("table2-note").textContent =
+          `IS: sessions ${wfSplit.is_sessions || "1\u201340"} (${wfSplit.is_days || 40}d); purged OOS: sessions ${wfSplit.oos_sessions || "41\u201360"} (${wfSplit.oos_days || 20}d, EOD flat purge). ` +
+          `DSR evaluates full-sample SR against Bailey\u2013L\u00f3pez de Prado multiple-testing hurdle SR* = ${fmt(wfSplit.sr_benchmark_m16 || 4.46, 2)} (M = ${wfSplit.trials_m || 16}) with exact skew & kurtosis.`;
+      }
+
+      // =========================================================================
+      // 3. RENDER TABLE III (ADVERSARIAL MICROSTRUCTURE STRESS MATRIX)
+      // =========================================================================
+      function renderTable3() {
+        const tbody = document.getElementById("table3-body");
+        const tfoot = document.getElementById("table3-foot");
+        tbody.innerHTML = "";
+        tfoot.innerHTML = "";
+
+        const shortRowNames = {
+          flash_crash: "Flash Crash",
+          momentum_meltup: "Momentum Melt-Up",
+          cost_shock_2x: "2\u00d7 Cost Shock",
+          latency_lag_1m: "+1m Latency Lag",
+        };
+
+        const keys = ["single_8m", "adaptive_1x", "ou_spectral_1x", "ou_spectral_turbo"];
+        const sumsSR = { single_8m: 0, adaptive_1x: 0, ou_spectral_1x: 0, ou_spectral_turbo: 0 };
+        const sumsMDD = { single_8m: 0, adaptive_1x: 0, ou_spectral_1x: 0, ou_spectral_turbo: 0 };
+
+        function cellHtml(entry, emphasize) {
+          const sr = entry.net_sharpe;
+          const mdd = entry.max_drawdown_pct;
+          const cls = sr < 0 ? "neg-val" : (emphasize ? "pos-strong" : "");
+          return `<span class="${cls}">${fmtSigned(sr, 2)}</span><span class="mdd-sub">(${fmt(mdd, 1)}%)</span>`;
+        }
+
+        stressTests.forEach((st) => {
+          const tr = document.createElement("tr");
+          if (st.id === "momentum_meltup") tr.className = "row-highlight";
+
+          keys.forEach((k) => {
+            sumsSR[k] += st.models[k].net_sharpe;
+            sumsMDD[k] += st.models[k].max_drawdown_pct;
+          });
+
+          tr.innerHTML = `
+            <td>${shortRowNames[st.id] || st.label}</td>
+            <td class="num">${cellHtml(st.models.single_8m, false)}</td>
+            <td class="num">${cellHtml(st.models.adaptive_1x, false)}</td>
+            <td class="num">${cellHtml(st.models.ou_spectral_1x, true)}</td>
+            <td class="num">${cellHtml(st.models.ou_spectral_turbo, true)}</td>
+          `;
+          tbody.appendChild(tr);
+        });
+
+        const nSt = Math.max(1, stressTests.length);
+        const footTr = document.createElement("tr");
+        footTr.innerHTML = `
+          <td>4-Regime Stress Mean</td>
+          <td class="num">${fmtSigned(sumsSR.single_8m / nSt, 2)}<span class="mdd-sub">(${fmt(sumsMDD.single_8m / nSt, 1)}%)</span></td>
+          <td class="num">${fmtSigned(sumsSR.adaptive_1x / nSt, 2)}<span class="mdd-sub">(${fmt(sumsMDD.adaptive_1x / nSt, 1)}%)</span></td>
+          <td class="num">${fmtSigned(sumsSR.ou_spectral_1x / nSt, 2)}<span class="mdd-sub">(${fmt(sumsMDD.ou_spectral_1x / nSt, 1)}%)</span></td>
+          <td class="num">${fmtSigned(sumsSR.ou_spectral_turbo / nSt, 2)}<span class="mdd-sub">(${fmt(sumsMDD.ou_spectral_turbo / nSt, 1)}%)</span></td>
+        `;
+        tfoot.appendChild(footTr);
+
+        const totalVetoes = stressTests.reduce((acc, st) => acc + (st.toxic_vetoes || 0), 0);
+        document.getElementById("table3-note").textContent =
+          `Each cell reports annualized Net SR with max drawdown (%) in parentheses over ${rmeta.stress_sessions_per_scenario || 20} unseen sessions. ` +
+          `VPIN+Hurst toxicity gating fired ${fmtInt(totalVetoes)} combined vetoes across the four stress regimes.`;
+      }
+
+      // =========================================================================
+      // 4. POPULATE DYNAMIC QUANTITATIVE PROSE (ZERO HARDCODED METRICS)
+      // =========================================================================
+      function renderProse() {
+        const stFlash = stressById.flash_crash;
+        const stMelt = stressById.momentum_meltup;
+        const stCost = stressById.cost_shock_2x;
+        const stLat = stressById.latency_lag_1m;
+
+        const d1 = decay.find((d) => d.horizon_min === 1) || decay[0];
+        const d3 = decay.find((d) => d.horizon_min === 3) || decay[2];
+        const d5 = decay.find((d) => d.horizon_min === 5) || decay[3];
+        const d18 = decay.find((d) => d.horizon_min === (tele.peak_ir_horizon_min || 18)) || decay[8];
+        const d20 = decay.find((d) => d.horizon_min === 20) || decay[9];
+        const d30 = decay.find((d) => d.horizon_min === 30) || decay[decay.length - 1];
+
+        const meanStress8 = stressTests.reduce((a, s) => a + s.models.single_8m.net_sharpe, 0) / stressTests.length;
+        const meanStressAdapt = stressTests.reduce((a, s) => a + s.models.adaptive_1x.net_sharpe, 0) / stressTests.length;
+        const meanStressOu1x = stressTests.reduce((a, s) => a + s.models.ou_spectral_1x.net_sharpe, 0) / stressTests.length;
+        const meanStressTurbo = stressTests.reduce((a, s) => a + s.models.ou_spectral_turbo.net_sharpe, 0) / stressTests.length;
+
+        // Fig. 2 Caption
+        document.getElementById("fig2-caption").innerHTML =
+          `<span class="fig-label">Fig. 2.</span> Empirical validation of the OU-Spectral 5&ndash;20m architecture across ` +
+          `${metaBase.sessions || 60} core sessions and ${stressTests.length * (rmeta.stress_sessions_per_scenario || 20)} unseen adversarial stress sessions. ` +
+          `(a) Forward net edge (bps/trade) from 1m to 30m: sub-5m noise is strictly negative after friction (${fmtSigned(d1.ou_spectral_vpin_net_bps, 2)} bps at 1m), ` +
+          `while the Ice-Blue 5&ndash;20m sweet spot stays strictly positive for OU-Spectral VPIN, peaking at ${fmtSigned(d18.ou_spectral_vpin_net_bps, 2)} bps at ${d18.horizon_min}m. ` +
+          `(b) Annualized net Sharpe across four hostile stress regimes; VPIN&ndash;Hurst gating lifts 4-regime mean stress Sharpe from ${fmtSigned(meanStressAdapt, 2)} (Adaptive 1x) ` +
+          `to ${fmtSigned(meanStressOu1x, 2)} (OU-VPIN 1x) and ${fmtSigned(meanStressTurbo, 2)} (OU-Turbo).`;
+
+        // Sec IV.A worked paragraph
+        document.getElementById("sec4a-worked").innerHTML =
+          `With log-bandwidth <span class="m-it">&gamma;</span> = ${fmt(rmeta.ou_kernel_gamma || 0.85, 2)} and empirical-Bayes prior ` +
+          `${fmt(rmeta.ou_prior_tau_v || 11.5, 1)}m, <span class="m-atom"><span class="m-hat">&tau;</span><span class="m-sub">1/2</span>(<span class="m-it">t</span>)</span> ` +
+          `contracts to ${fmt(tele.tau_half_open_min, 2)}m at the open surge and ${fmt(tele.tau_half_close_min, 2)}m into the close, ` +
+          `and expands to ${fmt(tele.tau_half_midday_min, 2)}m during midday calm. Scaling holding horizon via ` +
+          `clamp(round(1.6&thinsp;<span class="m-atom"><span class="m-hat">&tau;</span><span class="m-sub">1/2</span></span>), 5, 20) yields a ${fmt(mOu1x.avg_hold_min, 2)}m average hold, ` +
+          `+${fmt(mOu1x.vwap_slippage_saved_bps, 2)} bps VWAP slippage saved, and ${fmt(mOu1x.full_sharpe, 2)} full-sample Net Sharpe at 1x taker friction.`;
+
+        // Sec IV.B worked paragraph
+        document.getElementById("sec4b-worked").innerHTML =
+          `Across the 60 baseline sessions, mean |<span class="m-atom"><span class="m-it">C</span><span class="m-sub m-it">t</span></span>| = ${fmt(tele.mean_abs_curvature, 3)}, ` +
+          `mean VPIN = ${fmt(tele.mean_vpin, 3)}, and mean Lo&ndash;MacKinlay Hurst <span class="m-atom"><span class="m-hat-cap">H</span><span class="m-sub m-it">t</span></span> = ${fmt(tele.mean_hurst, 3)} ` +
+          `(below the 0.50 random-walk boundary, confirming structural reversion). Requiring curvature deceleration plus a two-timescale toxicity check ` +
+          `fires ${fmtInt(mOu1x.toxic_vetoes_60d)} causal vetoes over 60 sessions, trimming 1x drawdown from ${fmt(mAdapt.max_drawdown_pct, 2)}% (Adaptive) to ${fmt(mOu1x.max_drawdown_pct, 2)}%.`;
+
+        // Sec V.A Purged Walk-Forward
+        document.getElementById("sec5a-body").innerHTML =
+          `Splitting chronologically into in-sample sessions ${wfSplit.is_sessions || "1\u201340"} and purged out-of-sample sessions ` +
+          `${wfSplit.oos_sessions || "41\u201360"} exposes overfitting in heuristic blends: Adaptive Blend (1x) drops from ${fmt(mAdapt.is_sharpe, 2)} IS ` +
+          `to ${fmt(mAdapt.oos_sharpe, 2)} OOS (${fmt(mAdapt.oos_retention_pct, 1)}% retention). In contrast, OU-Spectral Curvature-VPIN (1x) ` +
+          `advances from ${fmt(mOu1x.is_sharpe, 2)} IS to ${fmt(mOu1x.oos_sharpe, 2)} OOS (${fmt(mOu1x.oos_retention_pct, 1)}% retention), and ` +
+          `OU-Spectral Turbo (Maker+Kelly) climbs from ${fmt(mOuTurbo.is_sharpe, 2)} to ${fmt(mOuTurbo.oos_sharpe, 2)} OOS (${fmt(mOuTurbo.oos_retention_pct, 1)}%).`;
+
+        // Sec V.B DSR (M=16)
+        document.getElementById("sec5b-body").innerHTML =
+          `Evaluating all ${wfSplit.trials_m || 16} candidate strategies under Bailey&ndash;L&oacute;pez de Prado multiple-testing deflation ` +
+          `raises the expected maximum noise Sharpe hurdle to <span class="m-it">SR</span>* = ${fmt(wfSplit.sr_benchmark_m16 || 4.46, 2)}. ` +
+          `Adjusted for empirical skewness and kurtosis, 8m Elastic Fade falls to ${fmt(m8.dsr_pct, 2)}% DSR (failing significance), ` +
+          `whereas OU-Spectral VPIN (1x) reaches ${fmt(mOu1x.psr_pct, 2)}% PSR and ${fmt(mOu1x.dsr_pct, 2)}% DSR (${fmt(mOu1x.dsr_oos_pct, 2)}% OOS DSR), ` +
+          `and OU-Spectral Turbo achieves ${fmt(mOuTurbo.psr_pct, 2)}% PSR and ${fmt(mOuTurbo.dsr_pct, 2)}% DSR.`;
+
+        // Sec V.C Alpha Decay
+        document.getElementById("sec5c-body").innerHTML =
+          `Panel (a) confirms mathematically why 5&ndash;20m is the execution sweet spot. Below 5m, spread and impact overwhelm reversion ` +
+          `(${fmtSigned(d1.ou_spectral_vpin_net_bps, 2)} to ${fmtSigned(d3.ou_spectral_vpin_net_bps, 2)} bps). By ${d5.horizon_min}m net edge turns positive ` +
+          `(${fmtSigned(d5.ou_spectral_vpin_net_bps, 2)} bps), peaks at ${d18.horizon_min}m (${fmtSigned(d18.ou_spectral_vpin_net_bps, 2)} bps, IR ${fmt(d18.ou_spectral_vpin_ir, 4)}), ` +
+          `and decays past ${d20.horizon_min}m to ${fmtSigned(d30.ou_spectral_vpin_net_bps, 2)} bps by 30m as institutional drift overtakes temporary liquidity impact.`;
+
+        // Sec VI.A Stress Lesson A (Melt-Up & Toxicity Gating)
+        const mddCutPct = ((stMelt.models.adaptive_1x.max_drawdown_pct - stMelt.models.ou_spectral_1x.max_drawdown_pct) / stMelt.models.adaptive_1x.max_drawdown_pct) * 100;
+        const srLossCutPct = ((Math.abs(stMelt.models.adaptive_1x.net_sharpe) - Math.abs(stMelt.models.ou_spectral_1x.net_sharpe)) / Math.abs(stMelt.models.adaptive_1x.net_sharpe)) * 100;
+        document.getElementById("sec6a-body").innerHTML =
+          `In the unseen Toxic Momentum Melt-Up (mean VPIN ${fmt(stMelt.vpin_mean, 3)}, Hurst ${fmt(stMelt.hurst_mean, 3)}), ` +
+          `ungated fades suffer severe adverse selection: 8m Single collapses to ${fmtSigned(stMelt.models.single_8m.net_sharpe, 2)} SR ` +
+          `(${fmt(stMelt.models.single_8m.max_drawdown_pct, 2)}% MDD) and Adaptive 1x to ${fmtSigned(stMelt.models.adaptive_1x.net_sharpe, 2)} SR ` +
+          `(${fmt(stMelt.models.adaptive_1x.max_drawdown_pct, 2)}% MDD). Firing ${fmtInt(stMelt.toxic_vetoes)} vetoes, OU-VPIN (1x) slashes ` +
+          `max drawdown by ${Math.round(mddCutPct)}% to ${fmt(stMelt.models.ou_spectral_1x.max_drawdown_pct, 2)}% and trims Sharpe loss by ${Math.round(srLossCutPct)}% to ${fmtSigned(stMelt.models.ou_spectral_1x.net_sharpe, 2)}.`;
+
+        // Sec VI.B Stress Lesson B (Flash Crash, 2x Cost, +1m Latency)
+        document.getElementById("sec6b-body").innerHTML =
+          `Across Flash Crash (${fmtInt(stFlash.toxic_vetoes)} vetoes), 2&times; Friction Shock, and +1m Latency Lag, OU-Spectral VPIN (1x) ` +
+          `is the only 1x model that stays strictly positive in all three regimes (${fmtSigned(stFlash.models.ou_spectral_1x.net_sharpe, 2)}, ` +
+          `${fmtSigned(stCost.models.ou_spectral_1x.net_sharpe, 2)}, and ${fmtSigned(stLat.models.ou_spectral_1x.net_sharpe, 2)} SR), while ` +
+          `OU-Turbo raises the 4-regime stress average to ${fmtSigned(meanStressTurbo, 2)} SR versus ${fmtSigned(meanStress8, 2)} for 8m Single.`;
+      }
+
+      renderFig2();
+      renderTable2();
+      renderTable3();
+      renderProse();
+    })();
+  </script>
+</body>
+</html>

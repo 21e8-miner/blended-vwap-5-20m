@@ -83,9 +83,10 @@ def main() -> int:
     targets = [
         ("lab", OUTPUT_DIR / "workbench_tab1_lab.png", "workbench_tab1_lab.png"),
         ("attribution", OUTPUT_DIR / "workbench_tab2_attribution.png", "workbench_tab2_attribution.png"),
+        ("research", OUTPUT_DIR / "workbench_tab3_research.png", "workbench_tab3_research.png"),
     ]
     if args.include_sheet:
-        targets.append(("sheet", OUTPUT_DIR / "workbench_tab3_sheet.png", "workbench_tab3_sheet.png"))
+        targets.append(("sheet", OUTPUT_DIR / "workbench_tab4_sheet.png", "workbench_tab4_sheet.png"))
 
     for tab, out_path, artifact_name in targets:
         capture_tab(tab, out_path, width=args.width, height=args.height, scale=args.scale)

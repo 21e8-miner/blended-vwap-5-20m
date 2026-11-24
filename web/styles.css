@@ -68,8 +68,8 @@ html, body {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0 20px;
-  gap: 16px;
+  padding: 0 16px;
+  gap: 10px;
 }
 
 .brand {
@@ -130,9 +130,9 @@ html, body {
   background: transparent;
   color: #C7DCF4;
   font-family: var(--font-sans);
-  font-size: 12.5px;
+  font-size: 11.8px;
   font-weight: 500;
-  padding: 6px 14px;
+  padding: 5.5px 10px;
   border-radius: 4px;
   cursor: pointer;
   white-space: nowrap;
@@ -153,7 +153,8 @@ html, body {
 .topbar-actions {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 7px;
+  flex-shrink: 0;
 }
 
 .meta-pill {
@@ -568,6 +569,44 @@ html, body {
 
 .preset-btn.active small {
   color: #B9D4F2;
+}
+
+.preset-btn.preset-frontier {
+  grid-column: 1 / -1;
+  background: linear-gradient(90deg, #FFFFFF 0%, #EDF4FC 100%);
+  border-color: #9BB9DC;
+  border-left: 3px solid var(--cobalt);
+}
+
+.preset-btn.preset-frontier.active {
+  background: linear-gradient(135deg, #0B1F3A 0%, #1B4F9C 100%);
+  border-color: var(--navy);
+  border-left-color: #68A3DF;
+}
+
+.preset-row-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  gap: 6px;
+}
+
+.preset-pill-tag {
+  font-family: var(--font-mono);
+  font-size: 9.2px;
+  font-weight: 700;
+  padding: 1px 5px;
+  border-radius: 3px;
+  background: var(--ice);
+  color: var(--cobalt);
+  border: 1px solid #C5DAF1;
+}
+
+.preset-btn.preset-frontier.active .preset-pill-tag {
+  background: rgba(104, 163, 223, 0.22);
+  color: #DCEEFF;
+  border-color: rgba(104, 163, 223, 0.45);
 }
 
 /* Sliders */
@@ -1451,12 +1490,25 @@ table.booktabs tbody tr.flagship-row td {
 .live-telemetry-bar {
   display: flex;
   align-items: center;
-  flex-wrap: wrap;
-  gap: 14px;
-  padding: 6px 14px;
+  flex-wrap: nowrap;
+  gap: 10px;
+  padding: 5.5px 12px;
   background: var(--porcelain);
   border-bottom: 1px solid var(--border);
-  font-size: 11.5px;
+  font-size: 11px;
+  overflow-x: auto;
+}
+
+.tel-ou {
+  color: var(--cobalt) !important;
+}
+
+.tel-vpin.high {
+  color: var(--short) !important;
+}
+
+.tel-vpin.low {
+  color: var(--long) !important;
 }
 
 .tel-pill {
@@ -1631,6 +1683,318 @@ table.booktabs tbody tr.flagship-row td {
   line-height: 1.35;
 }
 
+/* ---------- Tab 3: Deep Research & Live Scanner ---------- */
+.research-row-top {
+  display: grid;
+  grid-template-columns: 1.54fr 1fr;
+  gap: 12px;
+  margin-bottom: 12px;
+  align-items: stretch;
+}
+
+.research-row-mid {
+  display: grid;
+  grid-template-columns: 1fr 1.54fr;
+  gap: 12px;
+  margin-bottom: 12px;
+  align-items: stretch;
+}
+
+.radar-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.radar-scroll {
+  max-height: 318px;
+}
+
+.wf-scroll {
+  max-height: 232px;
+}
+
+table.booktabs#radarTable tbody td {
+  padding: 4.2px 6.5px;
+  font-size: 11.1px;
+}
+
+table.booktabs#walkForwardTable thead th {
+  padding: 6.5px 6px;
+  font-size: 10px;
+}
+
+table.booktabs#walkForwardTable tbody td {
+  padding: 5.5px 6px;
+  font-size: 11px;
+}
+
+.vpin-cell {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 5px;
+}
+
+.vpin-bar {
+  width: 34px;
+  height: 5px;
+  border-radius: 3px;
+  background: #E2ECF7;
+  overflow: hidden;
+  display: inline-block;
+}
+
+.vpin-bar > i {
+  display: block;
+  height: 100%;
+  border-radius: 3px;
+}
+
+.hurst-pill,
+.action-pill {
+  display: inline-block;
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  padding: 1.5px 6px;
+  border-radius: 3px;
+  white-space: nowrap;
+}
+
+.hurst-pill.reverting { background: var(--long-bg); color: var(--long); }
+.hurst-pill.neutral   { background: var(--ice); color: var(--cobalt); }
+.hurst-pill.toxic     { background: var(--short-bg); color: var(--short); }
+
+.action-pill.strong-long  { background: var(--long); color: var(--white); }
+.action-pill.strong-short { background: var(--short); color: var(--white); }
+.action-pill.vetoed       { background: #FEF3E2; color: #8A4F08; border: 1px solid #ECC992; }
+.action-pill.watching     { background: var(--porcelain); color: var(--ink-muted); border: 1px solid var(--border); }
+
+.btn-radar-inspect {
+  appearance: none;
+  background: var(--porcelain);
+  color: var(--navy);
+  border: 1px solid var(--border-strong);
+  font-family: var(--font-sans);
+  font-size: 10.5px;
+  font-weight: 600;
+  padding: 2.5px 7px;
+  border-radius: 3px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.btn-radar-inspect:hover {
+  background: var(--navy);
+  border-color: var(--navy);
+  color: var(--white);
+}
+
+/* Term-Structure Live Factor Strip */
+.ts-factor-strip {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 6px;
+  padding: 6px 10px;
+  background: var(--porcelain);
+  border-bottom: 1px solid var(--border);
+}
+
+.ts-pill {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  background: var(--white);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 3px 4px;
+  line-height: 1.18;
+}
+
+.ts-pill small {
+  font-size: 8.5px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  color: var(--ink-muted);
+}
+
+.ts-pill strong {
+  font-size: 11.5px;
+  font-weight: 700;
+  color: var(--navy);
+}
+
+/* 4-Scenario Adversarial Microstructure Stress Matrix */
+.stress-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  padding: 10px 12px 12px;
+}
+
+.stress-card {
+  background: var(--porcelain);
+  border: 1px solid var(--border);
+  border-top: 2px solid var(--cobalt);
+  border-radius: 5px;
+  padding: 8px 10px 9px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.stress-card.stress-toxic {
+  background: linear-gradient(180deg, #FFFFFF 0%, #F2F7FE 100%);
+  border-top-color: var(--navy);
+}
+
+.stress-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 6px;
+  border-bottom: 1px solid #DCE7F4;
+  padding-bottom: 4px;
+}
+
+.stress-title {
+  font-family: var(--font-serif);
+  font-size: 12.8px;
+  font-weight: 700;
+  color: var(--navy);
+}
+
+.stress-shock-tag {
+  font-size: 9.5px;
+  font-weight: 600;
+  color: var(--cobalt);
+  background: var(--ice);
+  padding: 1px 5px;
+  border-radius: 3px;
+  white-space: nowrap;
+}
+
+.stress-desc {
+  font-family: var(--font-serif);
+  font-style: italic;
+  font-size: 10.2px;
+  color: var(--ink-muted);
+  line-height: 1.28;
+}
+
+.stress-bars {
+  display: flex;
+  flex-direction: column;
+  gap: 4.5px;
+}
+
+.stress-bar-row {
+  display: grid;
+  grid-template-columns: 74px minmax(0, 1fr) 82px;
+  align-items: center;
+  gap: 6px;
+  font-size: 10.4px;
+}
+
+.stress-model-lbl {
+  color: var(--ink-body);
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.stress-track {
+  position: relative;
+  height: 9px;
+  border-radius: 3px;
+  background: #E7F0FA;
+  overflow: hidden;
+}
+
+.stress-zero {
+  position: absolute;
+  left: 50%;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: #8FA9C7;
+  z-index: 2;
+}
+
+.stress-fill {
+  position: absolute;
+  top: 1px;
+  bottom: 1px;
+  border-radius: 2px;
+}
+
+.stress-fill.neg {
+  background: #B85260 !important;
+}
+
+.stress-val {
+  text-align: right;
+  font-weight: 700;
+  color: var(--navy);
+  font-size: 10.3px;
+  white-space: nowrap;
+}
+
+.stress-val small {
+  font-weight: 500;
+  color: var(--ink-muted);
+  font-size: 9.2px;
+}
+
+.stress-foot {
+  margin-top: auto;
+  padding-top: 4px;
+  border-top: 1px dashed #D3E2F3;
+  font-size: 10px;
+  color: var(--ink-body);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+}
+
+/* Tab 4 Editorial Blue Sheet Page Switcher */
+.sheet-page-switcher {
+  display: inline-flex;
+  background: var(--porcelain);
+  border: 1px solid var(--border-strong);
+  border-radius: 5px;
+  padding: 2px;
+  gap: 2px;
+}
+
+.sheet-page-btn {
+  appearance: none;
+  border: none;
+  background: transparent;
+  color: var(--ink-body);
+  font-family: var(--font-sans);
+  font-size: 11.5px;
+  font-weight: 600;
+  padding: 4.5px 10px;
+  border-radius: 4px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.sheet-page-btn:hover {
+  background: var(--ice);
+  color: var(--navy);
+}
+
+.sheet-page-btn.active {
+  background: var(--navy);
+  color: var(--white);
+}
+
 /* ---------- Empty / Error Banner ---------- */
 .data-banner {
   background: #FFF9EB;
@@ -1652,10 +2016,13 @@ table.booktabs tbody tr.flagship-row td {
   .kpi-strip {
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
-  .lab-grid {
+  .lab-grid,
+  .attr-top-grid,
+  .research-row-top,
+  .research-row-mid {
     grid-template-columns: 1fr;
   }
-  .attr-top-grid {
-    grid-template-columns: 1fr;
+  .stress-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }

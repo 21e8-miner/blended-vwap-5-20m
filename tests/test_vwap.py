@@ -27,6 +27,12 @@ from engine.blended_vwap import (
     compute_session_indicators,
     get_13_strategy_configs,
 )
+from engine.research_lab import (
+    ALPHA_DECAY_HORIZONS,
+    backtest_session_ou_spectral,
+    compute_ou_spectral_entry_signals,
+    compute_research_indicators,
+)
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 DATA_DIR = PROJECT_ROOT / "data"
@@ -322,6 +328,162 @@ class TestBlendedVwapEngine(unittest.TestCase):
         # First trades finishing well before t0 must match identically
         self.assertGreater(len(rows_o), 0)
         self.assertAlmostEqual(rows_o[0]["scaled_net_bps"], rows_p[0]["scaled_net_bps"], places=10)
+
+    def test_09_research_lab_causality_and_invariants(self) -> None:
+        """Verify Phase 2 OU-Spectral, Curvature, VPIN, Hurst causality, invariants, and JSON/bundle parity."""
+        t0 = 180
+        orig = self.sample_session
+        ind_orig = self.sample_ind
+        res_orig = compute_research_indicators(orig, ind_orig)
+
+        # Mathematical bounds & weight normalization on all 390 bars
+        self.assertEqual(res_orig.weights_ou.shape, (390, 4))
+        self.assertTrue(np.all(np.isfinite(res_orig.weights_ou)))
+        self.assertTrue(np.all(res_orig.weights_ou > 0.0))
+        np.testing.assert_allclose(np.sum(res_orig.weights_ou, axis=1), np.ones(390), atol=1e-12)
+
+        self.assertTrue(np.all(np.isfinite(res_orig.tau_half)))
+        self.assertTrue(np.all((res_orig.tau_half >= 4.5) & (res_orig.tau_half <= 22.0)))
+        self.assertTrue(np.all((res_orig.vpin >= 0.0) & (res_orig.vpin <= 1.0)))
+        self.assertTrue(np.all((res_orig.signed_ofi >= -1.0) & (res_orig.signed_ofi <= 1.0)))
+        self.assertTrue(np.all((res_orig.hurst > 0.0) & (res_orig.hurst < 1.0)))
+        self.assertTrue(np.all(np.isfinite(res_orig.curvature)))
+        self.assertTrue(np.all(np.isfinite(res_orig.d_curvature)))
+
+        # Strict zero-lookahead causality: heavily perturb bars t > t0
+        pert = SessionData(
+            session_id=orig.session_id,
+            times=list(orig.times),
+            open=orig.open.copy(),
+            high=orig.high.copy(),
+            low=orig.low.copy(),
+            close=orig.close.copy(),
+            volume=orig.volume.copy(),
+            rel_vol=orig.rel_vol.copy(),
+            vol_regime=orig.vol_regime.copy(),
+            transient_impact_bps=orig.transient_impact_bps.copy(),
+        )
+        pert.open[t0 + 1 :] *= 1.38
+        pert.high[t0 + 1 :] *= 1.45
+        pert.low[t0 + 1 :] *= 0.68
+        pert.close[t0 + 1 :] *= 1.31
+        pert.volume[t0 + 1 :] *= 8.0
+        pert.rel_vol[t0 + 1 :] *= 8.0
+
+        ind_pert = compute_session_indicators(pert)
+        res_pert = compute_research_indicators(pert, ind_pert)
+
+        for field_name in (
+            "tau_half",
+            "weights_ou",
+            "vwap_ou",
+            "sigma_ou",
+            "z_ou",
+            "level",
+            "slope",
+            "curvature",
+            "d_curvature",
+            "vpin",
+            "signed_ofi",
+            "hurst",
+        ):
+            np.testing.assert_allclose(
+                getattr(res_orig, field_name)[: t0 + 1],
+                getattr(res_pert, field_name)[: t0 + 1],
+                atol=1e-13,
+                err_msg=f"Lookahead leakage detected in {field_name}",
+            )
+        np.testing.assert_array_equal(res_orig.toxic_flag[: t0 + 1], res_pert.toxic_flag[: t0 + 1])
+
+        sig_o, _ = compute_ou_spectral_entry_signals(orig, ind_orig, res_orig, market_cfg=self.cfg)
+        sig_p, _ = compute_ou_spectral_entry_signals(pert, ind_pert, res_pert, market_cfg=self.cfg)
+        np.testing.assert_array_equal(sig_o[: t0 + 1], sig_p[: t0 + 1])
+
+        # Early OU-Spectral trades (both 1x and Turbo) finishing before t0 match identically
+        for turbo_flag in (False, True):
+            _, _, tr_o, _ = backtest_session_ou_spectral(orig, ind_orig, res_orig, self.cfg, turbo_mode=turbo_flag)
+            _, _, tr_p, _ = backtest_session_ou_spectral(pert, ind_pert, res_pert, self.cfg, turbo_mode=turbo_flag)
+            self.assertGreater(len(tr_o), 0)
+            self.assertAlmostEqual(tr_o[0]["scaled_net_bps"], tr_p[0]["scaled_net_bps"], places=10)
+
+        # Standalone research_lab.json, embedded vwap_metrics.json["research_lab"], and bundle.js parity
+        research_path = DATA_DIR / "research_lab.json"
+        metrics_path = DATA_DIR / "vwap_metrics.json"
+        session_path = DATA_DIR / "session_bars.json"
+        self.assertTrue(research_path.exists(), "data/research_lab.json missing")
+
+        rl = json.loads(research_path.read_text(encoding="utf-8"))
+        metrics = json.loads(metrics_path.read_text(encoding="utf-8"))
+        session = json.loads(session_path.read_text(encoding="utf-8"))
+        self.assertEqual(metrics["research_lab"], rl)
+
+        # Telemetry invariants: volume-clock half-life expands during midday lull vs open surge
+        tel = rl["telemetry"]
+        self.assertGreater(tel["tau_half_midday_min"], tel["tau_half_open_min"] + 2.0)
+        self.assertGreater(tel["tau_half_midday_min"], tel["tau_half_close_min"] + 2.0)
+        self.assertTrue(5 <= tel["peak_ir_horizon_min"] <= 20)
+
+        # Walk-Forward & DSR (M=16) invariants
+        wf = rl["walk_forward_dsr"]
+        self.assertEqual(wf["split"]["trials_m"], 16)
+        self.assertEqual(len(wf["models"]), 6)
+        model_map = {m["id"]: m for m in wf["models"]}
+        for m in wf["models"]:
+            self.assertGreaterEqual(m["psr_pct"], 0.0)
+            self.assertLessEqual(m["psr_pct"], 100.0)
+            self.assertGreaterEqual(m["dsr_pct"], 0.0)
+            self.assertLessEqual(m["dsr_pct"], 100.0)
+
+        ou_1x = model_map["ou_spectral_vpin_1x"]
+        ou_tb = model_map["ou_spectral_vpin_turbo"]
+        adapt = model_map["adaptive_blend_5_20"]
+        self.assertGreater(ou_1x["oos_sharpe"], adapt["oos_sharpe"])
+        self.assertGreater(ou_1x["full_sharpe"], adapt["full_sharpe"])
+        self.assertGreater(ou_tb["full_sharpe"], ou_1x["full_sharpe"])
+        self.assertGreater(ou_tb["dsr_pct"], 90.0)
+
+        # 4 Adversarial Stress Scenarios & VPIN+Hurst protection in momentum_meltup
+        stress = {s["id"]: s for s in rl["stress_tests"]}
+        self.assertEqual(
+            set(stress.keys()),
+            {"flash_crash", "momentum_meltup", "cost_shock_2x", "latency_lag_1m"},
+        )
+        mm = stress["momentum_meltup"]
+        self.assertGreater(mm["toxic_vetoes"], 100)
+        self.assertGreater(mm["models"]["ou_spectral_1x"]["net_sharpe"], mm["models"]["single_8m"]["net_sharpe"])
+        self.assertGreater(mm["models"]["ou_spectral_1x"]["net_sharpe"], mm["models"]["adaptive_1x"]["net_sharpe"])
+        self.assertGreater(mm["models"]["ou_spectral_turbo"]["net_sharpe"], mm["models"]["adaptive_1x"]["net_sharpe"])
+
+        # 12-point Alpha Decay Curve (1..30m)
+        decay = rl["alpha_decay_curve"]
+        self.assertEqual(tuple(pt["horizon_min"] for pt in decay), ALPHA_DECAY_HORIZONS)
+        sub5 = [pt["ou_spectral_vpin_net_bps"] for pt in decay if pt["horizon_min"] < 5]
+        sweet = [pt["ou_spectral_vpin_net_bps"] for pt in decay if pt["in_sweet_spot"]]
+        self.assertTrue(all(x < 0.0 for x in sub5), "Sub-5m friction should yield negative net edge")
+        self.assertTrue(all(x > 0.0 for x in sweet), "All 5-20m sweet-spot horizons should show positive net edge")
+
+        # Enriched session_bars.json schema check (all 10 required new fields + OU weights)
+        required_new_fields = (
+            "vwap6",
+            "vwap8",
+            "vwap12",
+            "vwap16",
+            "vwap18",
+            "vwap_ou",
+            "tau_half",
+            "curvature",
+            "vpin",
+            "hurst",
+        )
+        for bar in session["bars"]:
+            for fld in required_new_fields:
+                self.assertIn(fld, bar, f"Missing enriched bar field: {fld}")
+                self.assertTrue(math.isfinite(bar[fld]), f"Non-finite enriched field: {fld}")
+            self.assertAlmostEqual(
+                bar["ou_w5"] + bar["ou_w10"] + bar["ou_w15"] + bar["ou_w20"],
+                1.0,
+                places=3,
+            )
 
 
 if __name__ == "__main__":

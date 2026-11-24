@@ -19,7 +19,7 @@
       </div>
       <div class="brand-text">
         <span class="brand-title">Blended 5–20m VWAP</span>
-        <span class="brand-sub">Quant Blue Multi-Horizon Execution Workbench</span>
+        <span class="brand-sub">Quant Blue Execution Workbench</span>
       </div>
     </div>
 
@@ -29,6 +29,9 @@
       </button>
       <button class="nav-tab" role="tab" aria-selected="false" data-tab="attribution" id="tabBtnAttribution">
         Horizon Attribution &amp; Frontier
+      </button>
+      <button class="nav-tab" role="tab" aria-selected="false" data-tab="research" id="tabBtnResearch">
+        Deep Research &amp; Live Scanner
       </button>
       <button class="nav-tab" role="tab" aria-selected="false" data-tab="sheet" id="tabBtnSheet">
         Editorial Blue Sheet
@@ -46,7 +49,7 @@
           <rect x="2.5" y="1.5" width="11" height="13" rx="1.4" stroke="currentColor" stroke-width="1.4"/>
           <path d="M5 5h6M5 8h6M5 11h4" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>
         </svg>
-        Print / Open Blue Sheet
+        Print Blue Sheet
       </button>
     </div>
   </header>
@@ -219,6 +222,10 @@
                 <span class="dock-badge num" id="presetActiveLabel">Adaptive</span>
               </div>
               <div class="preset-grid" id="presetGrid">
+                <button class="preset-btn preset-frontier" data-preset="ou_spectral">
+                  <span class="preset-row-head"><span>OU-Spectral 5–20m</span><span class="preset-pill-tag">VPIN + &tau;&frac12;</span></span>
+                  <small>Volume-clock OU kernel &middot; curvature &amp; toxic-trend veto</small>
+                </button>
                 <button class="preset-btn active" data-preset="adaptive">
                   <span>Adaptive 5–20m</span>
                   <small>Volume-clock dynamic</small>
@@ -369,9 +376,11 @@
             <div class="live-telemetry-bar num" id="liveTelemetryBar">
               <span class="tel-pill" id="telStatusPill"><i class="live-dot sm"></i><span id="telStatusText">STATIC SNAPSHOT</span></span>
               <span class="tel-item"><small>LAST</small><strong id="telLastPx">—</strong></span>
-              <span class="tel-item"><small>BLENDED VWAP</small><strong id="telVwapPx">—</strong></span>
+              <span class="tel-item"><small>VWAP</small><strong id="telVwapPx">—</strong></span>
               <span class="tel-item"><small>DEV</small><strong id="telSpreadBps">—</strong></span>
               <span class="tel-item"><small>LIVE Z</small><strong class="tel-z" id="telLiveZ">—</strong></span>
+              <span class="tel-item"><small>OU &tau;&#189;</small><strong class="tel-ou" id="telOuTau">—</strong></span>
+              <span class="tel-item"><small>VPIN</small><strong class="tel-vpin" id="telVpin">—</strong></span>
               <span class="tel-item"><small>REL VOL</small><strong id="telRelVol">—</strong></span>
               <span class="tel-item"><small>ENGINE</small><strong class="tel-speed" id="telEngineMs">—</strong></span>
               <span class="tel-signal" id="telSignalState">WATCHING</span>
@@ -591,16 +600,156 @@
     </section>
 
     <!-- =====================================================================
-         TAB 3: EDITORIAL BLUE SHEET PREVIEW
+         TAB 3: DEEP RESEARCH & LIVE SCANNER
+         ===================================================================== -->
+    <section class="tab-panel" id="panel-research" role="tabpanel" aria-labelledby="tabBtnResearch">
+      <!-- Row 1: 8-Asset Live Signal Radar + 5-20m Term-Structure Yield Curve -->
+      <div class="research-row-top">
+        <!-- Left: Live 8-Asset 5-20m Signal Radar -->
+        <div class="card card-accent-top">
+          <div class="card-header">
+            <div class="card-title-group">
+              <h2 class="card-title">Live 8-Asset 5–20m Signal Radar</h2>
+              <span class="card-subtitle">Vectorized O(N) OU Half-Life, Curvature, VPIN &amp; Hurst</span>
+            </div>
+            <div class="radar-header-actions">
+              <span class="dock-badge num" id="radarLatencyBadge">8 Assets · — ms</span>
+              <button type="button" class="pill-btn" id="btnRescanRadar" title="Re-run multi-asset causal scan">Rescan</button>
+            </div>
+          </div>
+          <div class="tape-card-body">
+            <div class="table-scroll radar-scroll">
+              <table class="booktabs" id="radarTable">
+                <thead>
+                  <tr>
+                    <th class="left sortable" data-rsort="symbol">Symbol <span class="sort-arrow"></span></th>
+                    <th class="sortable" data-rsort="price">Last Px <span class="sort-arrow"></span></th>
+                    <th class="sortable" data-rsort="vwapOu">OU VWAP <span class="sort-arrow"></span></th>
+                    <th class="sortable" data-rsort="absZ">z-Score <span class="sort-arrow">&#9660;</span></th>
+                    <th class="sortable" data-rsort="tauHalf">OU &tau;&#189; <span class="sort-arrow"></span></th>
+                    <th class="sortable" data-rsort="curvature">Curv C<sub>t</sub> <span class="sort-arrow"></span></th>
+                    <th class="sortable" data-rsort="vpin">VPIN <span class="sort-arrow"></span></th>
+                    <th class="center sortable" data-rsort="hurst">Hurst Regime <span class="sort-arrow"></span></th>
+                    <th class="center sortable" data-rsort="actionRank">Live Action <span class="sort-arrow"></span></th>
+                    <th class="center">Lab</th>
+                  </tr>
+                </thead>
+                <tbody id="radarTableBody"></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        <!-- Right: 5-20m VWAP Term-Structure Curve (Yield-Curve SVG) -->
+        <div class="card card-accent-top">
+          <div class="card-header">
+            <div class="card-title-group">
+              <h2 class="card-title" id="tsCurveTitle">5–20m VWAP Term-Structure · ES</h2>
+            </div>
+            <span class="dock-badge num" id="tsCurveModeBadge">9 Horizons (5–20m)</span>
+          </div>
+          <div class="ts-factor-strip num" id="tsFactorStrip">
+            <span class="ts-pill"><small>LEVEL L</small><strong id="tsFactorLevel">—</strong></span>
+            <span class="ts-pill"><small>SLOPE S</small><strong id="tsFactorSlope">—</strong></span>
+            <span class="ts-pill"><small>CURV C</small><strong id="tsFactorCurv">—</strong></span>
+            <span class="ts-pill"><small>OU &tau;&#189;</small><strong id="tsFactorTau">—</strong></span>
+            <span class="ts-pill"><small>VPIN</small><strong id="tsFactorVpin">—</strong></span>
+          </div>
+          <div class="attr-chart-pad">
+            <svg id="termStructureChart" class="chart-svg" viewBox="0 0 540 218" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Continuous 5 to 20 minute VWAP term-structure yield curve"></svg>
+            <div id="tsTooltip" class="inspector-tooltip" style="min-width:175px;"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Row 2: Alpha Decay Curve (1m-30m) + Purged Walk-Forward IS/OOS & DSR Table -->
+      <div class="research-row-mid">
+        <!-- Left: Alpha Decay Curve (1m-30m SVG) -->
+        <div class="card card-accent-top">
+          <div class="card-header">
+            <div class="card-title-group">
+              <h2 class="card-title">Alpha Decay Frontier (1m–30m)</h2>
+            </div>
+            <div class="chart-legend compact">
+              <span class="legend-item"><i class="legend-line" style="background:#0B1F3A; height:2.5px;"></i>OU-VPIN</span>
+              <span class="legend-item"><i class="legend-line" style="background:#1B4F9C;"></i>Adaptive</span>
+              <span class="legend-item"><i class="legend-line dashed" style="border-color:#68A3DF;"></i>8m Single</span>
+            </div>
+          </div>
+          <div class="attr-chart-pad">
+            <svg id="alphaDecayChart" class="chart-svg" viewBox="0 0 540 214" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Forward alpha decay frontier from 1 minute to 30 minutes"></svg>
+            <div id="alphaDecayTooltip" class="inspector-tooltip" style="min-width:190px;"></div>
+          </div>
+        </div>
+
+        <!-- Right: Purged Walk-Forward IS vs OOS & Deflated Sharpe (M=16) -->
+        <div class="card card-accent-top">
+          <div class="card-header">
+            <div class="card-title-group">
+              <h2 class="card-title">Table II. Purged Walk-Forward &amp; Deflated Sharpe</h2>
+              <span class="card-subtitle" id="wfMetaSubtitle">IS 1–40 vs OOS 41–60 · Bailey–L&oacute;pez de Prado DSR (M=16)</span>
+            </div>
+            <span class="dock-badge num" id="wfRetentionBadge">OOS Verified</span>
+          </div>
+          <div class="tape-card-body">
+            <div class="table-scroll wf-scroll">
+              <table class="booktabs" id="walkForwardTable">
+                <thead>
+                  <tr>
+                    <th class="left">Benchmark Model</th>
+                    <th>IS SR</th>
+                    <th>OOS SR</th>
+                    <th>OOS Ret%</th>
+                    <th>Slip. Saved</th>
+                    <th>PSR</th>
+                    <th>DSR (M=16)</th>
+                    <th>OOS/IS</th>
+                  </tr>
+                </thead>
+                <tbody id="walkForwardBody"></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Row 3: 4-Scenario Adversarial Microstructure Stress Matrix -->
+      <div class="card card-accent-top">
+        <div class="card-header">
+          <div class="card-title-group">
+            <h2 class="card-title">Table III. Adversarial Microstructure Stress Matrix</h2>
+            <span class="card-subtitle" id="stressMetaSubtitle">Unseen-seed hostile regime resilience · 20 sessions per stress scenario</span>
+          </div>
+          <div class="chart-legend compact">
+            <span class="legend-item"><i class="swatch" style="background:#94B6DA;"></i>8m Single</span>
+            <span class="legend-item"><i class="swatch" style="background:#3B76C4;"></i>Adaptive (1&times;)</span>
+            <span class="legend-item"><i class="swatch" style="background:#1B4F9C;"></i>OU-VPIN (1&times;)</span>
+            <span class="legend-item"><i class="swatch" style="background:#0B1F3A;"></i>OU Turbo</span>
+          </div>
+        </div>
+        <div class="stress-grid" id="stressMatrixGrid"></div>
+      </div>
+    </section>
+
+    <!-- =====================================================================
+         TAB 4: EDITORIAL BLUE SHEET PREVIEW (PAGE 1 / PAGE 2 SWITCHER)
          ===================================================================== -->
     <section class="tab-panel" id="panel-sheet" role="tabpanel" aria-labelledby="tabBtnSheet">
       <div class="sheet-toolbar">
         <div class="card-title-group">
-          <h2 class="card-title">Publication Broadsheet — Blended 5–20m VWAP Editorial Blue Sheet</h2>
-          <span class="card-subtitle">Single-page Letter layout powered by identical quantitative bundle</span>
+          <h2 class="card-title" id="sheetToolbarTitle">Publication Broadsheet — Map of Blended 5–20m VWAP (Page 1)</h2>
+          <span class="card-subtitle" id="sheetToolbarSub">Single-page Letter layout powered by identical quantitative bundle</span>
         </div>
         <div class="sheet-actions">
-          <a class="btn-secondary" href="blue_sheet.html" target="_blank" rel="noopener">Open Full Sheet &#8599;</a>
+          <div class="sheet-page-switcher" id="sheetPageSwitcher" role="group" aria-label="Editorial broadsheet page">
+            <button type="button" class="sheet-page-btn active" data-page="1" data-src="blue_sheet.html">
+              Page 1 · Map of Blended 5–20m VWAP
+            </button>
+            <button type="button" class="sheet-page-btn" data-page="2" data-src="research_brief.html">
+              Page 2 · OU-Spectral Research Brief
+            </button>
+          </div>
+          <a class="btn-secondary" id="btnOpenFullSheet" href="blue_sheet.html" target="_blank" rel="noopener">Open Full Sheet &#8599;</a>
           <button class="btn-primary" id="btnPrintSheet">Print / Save PDF</button>
         </div>
       </div>

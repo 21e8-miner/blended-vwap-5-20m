@@ -4,16 +4,21 @@ A causal multi-horizon intraday VWAP execution & alpha framework spanning the **
 
 ## Live Demo & Shareable Links
 
-- **Interactive 5–20m VWAP Workbench:** [https://21e8-miner.github.io/blended-vwap-5-20m/](https://21e8-miner.github.io/blended-vwap-5-20m/)
-- **Editorial Blue Sheet (1-Page Print Broadsheet):** [https://21e8-miner.github.io/blended-vwap-5-20m/web/blue_sheet.html](https://21e8-miner.github.io/blended-vwap-5-20m/web/blue_sheet.html)
-- **Print-Ready PDF:** [`output/blended_vwap_blue_sheet.pdf`](./output/blended_vwap_blue_sheet.pdf)
+- **Interactive 5–20m VWAP Workbench (Live Lab + Multi-Symbol + Real-Time + Turbo 10×):** [https://21e8-miner.github.io/blended-vwap-5-20m/](https://21e8-miner.github.io/blended-vwap-5-20m/)
+- **Deep Quant Research & Live 8-Asset Signal Radar:** [https://21e8-miner.github.io/blended-vwap-5-20m/web/index.html?tab=research](https://21e8-miner.github.io/blended-vwap-5-20m/web/index.html?tab=research)
+- **Editorial Blue Sheet — Page 1 (Map of Blended 5–20m VWAP):** [https://21e8-miner.github.io/blended-vwap-5-20m/web/blue_sheet.html](https://21e8-miner.github.io/blended-vwap-5-20m/web/blue_sheet.html) · [PDF](./output/blended_vwap_blue_sheet.pdf)
+- **Companion Research Brief — Page 2 (OU-Spectral, Curvature & Toxicity Gating):** [https://21e8-miner.github.io/blended-vwap-5-20m/web/research_brief.html](https://21e8-miner.github.io/blended-vwap-5-20m/web/research_brief.html) · [PDF](./output/ou_spectral_research_brief.pdf)
 
 ---
 
 ## Preview
 
-### Editorial Blue Sheet
+### Page 1 — Editorial Blue Sheet & Page 2 — OU-Spectral Research Brief
 ![The Map of Blended 5–20m VWAP](./output/blended_vwap_blue_sheet.png)
+![Spectral VWAP: OU Half-Life, Curvature & Toxicity Gating](./output/ou_spectral_research_brief.png)
+
+### Deep Research Lab & Live 8-Asset Signal Radar
+![Deep Quant Research & Live 8-Asset Radar](./output/workbench_tab3_research.png)
 
 ### Interactive 5–20m Window Lab
 ![Interactive 5–20m VWAP Window Lab](./output/workbench_tab1_lab.png)

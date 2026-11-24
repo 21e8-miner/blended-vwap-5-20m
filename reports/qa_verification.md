@@ -54,3 +54,58 @@
 ## Final Sign-Off
 
 All three tracks (`@quant-engine`, `@blue-sheet`, `@interactive-lab`) pass independent quantitative, programmatic, DOM, PDF, and visual QA with **zero open defects**. Approved for delivery.
+
+---
+
+# Phase 2 Deep Research Mission — Independent QA Verification Sign-Off
+
+**Status:** **PASS — ALL PHASE 2 CHECKS VERIFIED (0 OPEN DEFECTS)**  
+**Scope:** Frontier `OU-Spectral Curvature-VPIN 5–20m` engine (`engine/research_lab.py`), Page-2 IEEE Research Brief (`web/research_brief.html`), and Upgraded Interactive Workbench (`Tab 3 Deep Research & Live Scanner`, `Tab 1 OU-Spectral + VPIN`, `Tab 4 Page 1/2 Switcher`).
+
+---
+
+## 4. Deep Research Engine & Statistical Rigor (`@quant-engine`)
+
+| Check | Method & Evidence | Result |
+|---|---|---|
+| Full Unit Test Suite | `python -m unittest discover -s tests -v` | **PASS** — **9/9 tests OK** (`0.932s`), including `test_08` (Turbo 10x) & `test_09` (Phase 2 causality & invariants) |
+| Multi-Cutoff Zero-Lookahead Causality | Code audit of `engine/research_lab.py` + independent perturbation of bars $t > t_0$ across 4 cutoffs ($t_0 \in \{40, 120, 180, 260\}$) on all 13 research indicators (`tau_half`, `weights_ou`, `vwap_ou`, `sigma_ou`, `z_ou`, `level`, `slope`, `curvature`, `d_curvature`, `vpin`, `signed_ofi`, `hurst`, `toxic_flag`), entry signals, and `backtest_session_ou_spectral` (1x, Turbo, and `latency_bars=1`) | **PASS** — `atol = 1e-13` exact match on all causal arrays; identical early trade PnL ($\le 10^{-12}$) including under `+1m` latency lag |
+| Enriched `session_bars.json` & Math | Verified all 24 Phase-1 fields preserved + 17 new fields (`vwap6..18`, `vwap_ou`, `sigma_ou`, `z_ou`, `tau_half`, `slope`, `curvature`, `vpin`, `hurst`, `ou_w5..20`) on 390 bars | **PASS** — `max_ou_wsum_err = 0.000000`, `max_ou_vwap_err = 0.000084`, `max_curv_err = 0.0027`, `vpin` $\in [0, 1]$, `hurst` $\in (0, 1)$, `tau_half` $\in [5.0, 19.5]$ |
+| Purged Walk-Forward & DSR ($M = 16$) | Independent deterministic reproduction of `run_research_lab` + first-principles Bailey–López de Prado PSR/DSR calculation with exact skewness, Pearson kurtosis, and cross-sectional daily SR std dev across all 16 trials | **PASS** — Exact match (`SR* = 4.46`): `OU-Spectral 1x` IS `5.71` / OOS `6.85` (`119.9%` ret.) / Full `6.16` / PSR `99.80%` / DSR `78.63%`; `OU-Spectral Turbo` IS `7.10` / OOS `9.26` (`130.5%` ret.) / Full `7.76` / PSR `99.99%` / DSR `94.35%` |
+| 4 Adversarial Microstructure Stress Tests | Audited `simulate_adversarial_regime` & `run_adversarial_stress_suite` across 4 distinct unseen seeds (`1101, 202, 3303, 4004`, none = `42`, 20 sessions each) | **PASS** — `OU-Spectral VPIN (1x)` outperforms `Adaptive (1x)` across all 4 regimes (`Flash Crash` `+0.98` vs `-3.88`, `Melt-Up` `-8.56` / `6.47%` MDD vs `-15.41` / `18.18%` MDD via `351` vetoes, `2x Cost` `+0.42` vs `-1.46`, `+1m Latency` `+4.76` vs `+1.57`) |
+| 12-Horizon Alpha Decay Curve | Audited horizons `1, 2, 3, 5, 8, 10, 12, 15, 18, 20, 25, 30` min | **PASS** — Sub-5m strictly negative (`-0.79` to `-0.47 bps`), positive across 5–20m (`+0.10` to peak `+1.44 bps` @ `18m`, IR `0.0507`), decays past 20m (`+0.57 bps` @ `30m`) |
+| Phase-1 Preservation & `bundle.js` Parity | `node --check data/bundle.js` + Node VM deep equality across `vwap_metrics.json`, `research_lab.json`, and `session_bars.json` | **PASS** — `{ metricsExact: true, sessionExact: true, researchLabExact: true }`; all 13 Phase-1 configs & `turbo_benchmark` preserved intact |
+
+---
+
+## 5. Page-2 IEEE OU-Spectral Research Brief (`@blue-sheet`)
+
+| Check | Method & Evidence | Result |
+|---|---|---|
+| Dual-Page PDF & Resolution | Binary inspection of Page 1 (`output/blended_vwap_blue_sheet.pdf`) & Page 2 (`output/ou_spectral_research_brief.pdf`) + PIL checks | **PASS** — Page 1 intact (`2200×2848`, 1-page Letter `612×792`, `233,386 B`); Page 2 (`2200×2848`, **exact 1-page Letter `612×792`**, `301,773 B`) |
+| Visual Fidelity, `Fig. 2`, Eq. `(3)`–`(4)` | `read_file` inspection of full sheet + native-resolution crops of `Fig. 2`, Left Column (Eq. 3–4 & Sec IV–V), and Right Column (`TABLE II`, `TABLE III`, Sec VI) | **PASS** — Crisp Quant Blue companion aesthetic, zero overlapping labels/bars/legends in dual-panel `Fig. 2`, clean display equations `(3)` and `(4)` |
+| DOM & Numeric Parity | `node --check` on inline JS (`rc=0`) + headless Edge `--dump-dom` (0 `NaN`/`undefined` in visible DOM, 0 loading placeholders) verifying all 6 `TABLE II` models, all 4 `TABLE III` regimes + 4-regime means (`-8.15 / -4.79 / -0.60 / +3.00`), and prose against `data/research_lab.json` | **PASS** — 100% exact numeric parity |
+
+**Defects Caught & Verified Resolved (Round 1 -> Round 2):**
+1. **Inline math hat (`^`) vertical collision (`web/research_brief.html` L262-284)**: Initial `.m-hat-cap::after { top: -0.34em; }` floated `^` over `H_t` into the word `baseline` on the line above, and `.m-hat::after` sat too high above lowercase `τ`. Lowered to `0.04em` / `-0.18em` — re-verified cleanly in native-resolution crop.
+2. **Panel `(a)` legend overlap (`web/research_brief.html` L1017-1027)**: Lowered and slimmed the legend box so the `8m Single` `25m` dot (`-0.28 bps`) sits 100% unobstructed above the legend border — re-verified in native-resolution crop.
+
+---
+
+## 6. Upgraded Interactive Workbench (`@interactive-lab`)
+
+| Check | Method & Evidence | Result |
+|---|---|---|
+| JS Syntax & Multi-Route DOM Audit | `node --check web/app.js` (`rc=0`) + headless Edge `--dump-dom` across `?tab=lab`, `?tab=lab&preset=ou_spectral`, `?tab=attribution`, `?tab=research`, `?tab=sheet`, and `?tab=sheet&page=2` | **PASS** — 0 `NaN`/`undefined`, `dataBanner` hidden, all preserved Tab 1 features (`symbolInput`, `csvFileInput`, live stream, `turbo`, `VPIN`) intact, Tab 4 Page 2 switcher sets `research_brief.html` |
+| Tab 3 Deep Research & Live Radar Parity | Verified all 8 live radar assets (`ES, SPY, QQQ, NVDA, AAPL, TSLA, MSFT, BTC-USD`, `3,120 bars` in `2.10 ms`), `ES` bar-389 exact match (`$149.42`, `-1.65σ`, `τ½ 5.9m`, `Curv +0.43`, `VPIN 0.34`, `Hurst 0.40`), all 6 `Table II` Walk-Forward/DSR rows, and all 4 `Table III` stress cards against `data/research_lab.json` | **PASS** — 100% exact parity |
+| Visual QA (`2880×1920 @2x`) | `read_file` inspection of `output/workbench_tab3_research.png` & `output/workbench_tab1_lab.png` + native-resolution crops | **PASS** — Crisp visual hierarchy, unobstructed `Alpha Decay` peak callout, clean 9-horizon `Term-Structure` SVG, readable `Table II`/`Table III` |
+
+**Defects Caught & Verified Resolved (Round 1 -> Round 2):**
+1. **Alpha Decay peak badge overlap (`web/app.js` L3768-3782)**: `Peak +1.44bp @ 18m` initially occluded the `Adaptive` `+2.05bp` vertex at `18m`. Moved below the `18m` `OU-VPIN` dot (`py + 13`) with a clean dashed leader — re-verified unobstructed in `output/workbench_tab3_research.png`.
+2. **JS `tauHalf` clamp parity (`web/app.js` L604 & L615)**: Aligned clamp from `[4.0, 22.0]` to `[5.0, 19.5]` matching `engine/research_lab.py` L129 so all 8 Live Signal Radar symbols stay cleanly inside the 5–20m band (`[5.0m, 6.2m]`) — re-verified in DOM & PNG.
+
+---
+
+## Phase 2 Final Sign-Off
+
+All Phase 2 Deep Research deliverables (`engine/research_lab.py`, `data/research_lab.json`, `data/bundle.js`, `web/research_brief.html`, `output/ou_spectral_research_brief.png/.pdf`, and upgraded `web/index.html` / `web/app.js`) pass independent quantitative, causality, statistical, DOM, PDF, and visual QA with **zero open defects**. Approved for final presentation.
