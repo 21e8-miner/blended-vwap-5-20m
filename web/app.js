@@ -60,7 +60,23 @@
     sortDir: "desc",
     // Computed session data
     simSeries: null,
-    simTrades: []
+    simTrades: [],
+    // Real-time stream & trigger notification state
+    rt: {
+      running: false,
+      cadenceMs: 1000,
+      timerId: null,
+      ws: null,
+      wsConnected: false,
+      tickCount: 0,
+      tempImpact: 0,
+      triggers: { breach: true, exit: true, surge: true },
+      channels: { toast: true, sound: true, desktop: false },
+      alerts: [],
+      lastZone: 0,
+      lastSurgeTick: -10,
+      livePos: null
+    }
   };
 
   let RAW_METRICS = null;
@@ -589,6 +605,11 @@
 
   async function loadSymbol(rawSymbol, opts = {}) {
     const symbol = normalizeSymbolInput(rawSymbol);
+    const wasRunning = state.rt.running;
+    disconnectLiveWebSocket();
+    state.rt.lastZone = 0;
+    state.rt.livePos = null;
+    state.rt.tempImpact = 0;
     state.symbol = symbol;
     state.selectedTradeIdx = null;
 
@@ -627,6 +648,9 @@
       } else {
         updateSymbolUI(symbol, "Calibrated 1m Model", "");
       }
+      if (wasRunning && state.rt.running) {
+        connectCryptoWebSocketIfApplicable();
+      }
     }
   }
 
@@ -650,6 +674,540 @@
       recomputeAndRenderLab();
     };
     reader.readAsText(file);
+  }
+
+  /* ---------- Real-Time Streaming, WebSocket & Trigger Notifications ---------- */
+  let AUDIO_CTX = null;
+
+  function playAlertChime(kind) {
+    if (!state.rt.channels.sound) return;
+    try {
+      const AudioCtor = window.AudioContext || window.webkitAudioContext;
+      if (!AudioCtor) return;
+      if (!AUDIO_CTX) AUDIO_CTX = new AudioCtor();
+      if (AUDIO_CTX.state === "suspended") AUDIO_CTX.resume();
+
+      const now = AUDIO_CTX.currentTime;
+      const freqs = kind === "long"
+        ? [523.25, 659.25]
+        : kind === "short"
+          ? [659.25, 493.88]
+          : kind === "surge"
+            ? [587.33, 880.0]
+            : [440.0, 554.37];
+
+      freqs.forEach((f, idx) => {
+        const osc = AUDIO_CTX.createOscillator();
+        const gain = AUDIO_CTX.createGain();
+        osc.type = "sine";
+        osc.frequency.setValueAtTime(f, now + idx * 0.11);
+        gain.gain.setValueAtTime(0.0001, now + idx * 0.11);
+        gain.gain.exponentialRampToValueAtTime(0.065, now + idx * 0.11 + 0.015);
+        gain.gain.exponentialRampToValueAtTime(0.0001, now + idx * 0.11 + 0.18);
+        osc.connect(gain);
+        gain.connect(AUDIO_CTX.destination);
+        osc.start(now + idx * 0.11);
+        osc.stop(now + idx * 0.11 + 0.2);
+      });
+    } catch (_err) {
+      // Audio playback blocked before user gesture
+    }
+  }
+
+  function showToast(alertObj) {
+    if (!state.rt.channels.toast) return;
+    const host = $("toastContainer");
+    if (!host) return;
+
+    while (host.children.length >= 4) {
+      host.removeChild(host.firstChild);
+    }
+
+    const card = document.createElement("div");
+    card.className = `toast-card ${alertObj.kind}`;
+    card.innerHTML =
+      `<div class="toast-head">` +
+        `<span class="toast-title">${alertObj.symbol} · ${alertObj.label}</span>` +
+        `<span class="toast-time num">${alertObj.time}</span>` +
+      `</div>` +
+      `<div class="toast-body num">${alertObj.detail}</div>`;
+
+    const dismiss = () => {
+      if (card.parentNode) card.parentNode.removeChild(card);
+    };
+    card.addEventListener("click", dismiss);
+    host.appendChild(card);
+    setTimeout(dismiss, 5500);
+  }
+
+  function sendDesktopNotification(alertObj) {
+    if (!state.rt.channels.desktop) return;
+    if (typeof Notification === "undefined" || Notification.permission !== "granted") return;
+    try {
+      new Notification(`${alertObj.symbol} — ${alertObj.label}`, {
+        body: alertObj.detail,
+        tag: `vwap-${alertObj.symbol}-${alertObj.kind}`
+      });
+    } catch (_err) {
+      // Ignore restricted desktop notification contexts
+    }
+  }
+
+  function renderAlertLog() {
+    const tbody = $("alertLogBody");
+    const badge = $("alertCountBadge");
+    if (!tbody || !badge) return;
+    const list = state.rt.alerts;
+    badge.textContent = `${list.length} alert${list.length === 1 ? "" : "s"}`;
+    clearEl(tbody);
+
+    if (list.length === 0) {
+      const tr = document.createElement("tr");
+      tr.className = "empty-alert-row";
+      tr.innerHTML = `<td colspan="8" class="center">Click <strong>Start Live</strong> or <strong>Test Alert</strong> to stream real-time 5–20m VWAP triggers.</td>`;
+      tbody.appendChild(tr);
+      return;
+    }
+
+    list.forEach(a => {
+      const tr = document.createElement("tr");
+      tr.innerHTML =
+        `<td class="left num">${a.time}</td>` +
+        `<td class="left"><strong>${a.symbol}</strong></td>` +
+        `<td class="center"><span class="trig-badge ${a.kind}">${a.label}</span></td>` +
+        `<td class="num">${fmt(a.price, a.price >= 1000 ? 1 : 2)}</td>` +
+        `<td class="num">${fmt(a.vwap, a.vwap >= 1000 ? 1 : 2)}</td>` +
+        `<td class="num ${a.z <= -state.entryZ ? "pos" : a.z >= state.entryZ ? "neg" : ""}">${fmtSigned(a.z, 2)}\u03C3</td>` +
+        `<td class="num">${fmt(a.relVol, 2)}\u00D7</td>` +
+        `<td class="left">${a.detail}</td>`;
+      tbody.appendChild(tr);
+    });
+  }
+
+  function emitTriggerAlert(kind, label, bar, vwapPx, zVal, detail) {
+    const alertObj = {
+      id: Date.now() + Math.random(),
+      time: bar.time || new Date().toTimeString().slice(0, 8),
+      symbol: state.symbol,
+      kind,
+      label,
+      price: Number(bar.close),
+      vwap: Number(vwapPx),
+      z: Number(zVal),
+      relVol: Number(bar.rel_vol || 1.0),
+      detail
+    };
+    state.rt.alerts.unshift(alertObj);
+    if (state.rt.alerts.length > 60) state.rt.alerts.pop();
+    renderAlertLog();
+    showToast(alertObj);
+    playAlertChime(kind);
+    sendDesktopNotification(alertObj);
+  }
+
+  function updateLiveTelemetry() {
+    if (!RAW_SESSION || !RAW_SESSION.bars || !RAW_SESSION.bars.length || !state.simSeries) return;
+    const bars = RAW_SESSION.bars;
+    const idx = bars.length - 1;
+    const bar = bars[idx];
+    const vwap = state.simSeries.vwapBlend[idx];
+    const z = state.simSeries.zSeries[idx];
+    const spreadBps = ((bar.close - vwap) / Math.max(1e-6, vwap)) * 10000;
+    const digits = bar.close >= 1000 ? 1 : 2;
+
+    const pill = $("telStatusPill");
+    const statusTxt = $("telStatusText");
+    if (pill && statusTxt) {
+      pill.classList.toggle("live", state.rt.running);
+      statusTxt.textContent = state.rt.running
+        ? (state.rt.wsConnected ? "COINBASE WS LIVE" : `LIVE STREAM · ${(state.rt.cadenceMs / 1000).toFixed(1)}s`)
+        : "STATIC SNAPSHOT";
+    }
+
+    if ($("telLastPx")) $("telLastPx").textContent = `$${fmt(bar.close, digits)}`;
+    if ($("telVwapPx")) $("telVwapPx").textContent = `$${fmt(vwap, digits)}`;
+    if ($("telSpreadBps")) $("telSpreadBps").textContent = `${fmtSigned(spreadBps, 1)} bp`;
+
+    const zEl = $("telLiveZ");
+    if (zEl) {
+      zEl.textContent = `${fmtSigned(z, 2)}\u03C3`;
+      zEl.classList.remove("zone-long", "zone-short");
+      if (z <= -state.entryZ) zEl.classList.add("zone-long");
+      else if (z >= state.entryZ) zEl.classList.add("zone-short");
+    }
+    if ($("telRelVol")) $("telRelVol").textContent = `${fmt(bar.rel_vol || 1.0, 2)}\u00D7`;
+
+    const sigEl = $("telSignalState");
+    if (sigEl) {
+      sigEl.classList.remove("long", "short");
+      if (z <= -state.entryZ) {
+        sigEl.textContent = "LONG ENTRY ZONE";
+        sigEl.classList.add("long");
+      } else if (z >= state.entryZ) {
+        sigEl.textContent = "SHORT ENTRY ZONE";
+        sigEl.classList.add("short");
+      } else if (state.rt.livePos) {
+        sigEl.textContent = `ACTIVE ${state.rt.livePos.side}`;
+        sigEl.classList.add(state.rt.livePos.side === "LONG" ? "long" : "short");
+      } else {
+        sigEl.textContent = "WATCHING";
+      }
+    }
+  }
+
+  function evaluateLiveTriggers(bar, vwapPx, zVal) {
+    const rt = state.rt;
+    const digits = bar.close >= 1000 ? 1 : 2;
+    const spreadBps = ((bar.close - vwapPx) / Math.max(1e-6, vwapPx)) * 10000;
+
+    // 1. Band Breach Trigger
+    if (rt.triggers.breach) {
+      if (zVal <= -state.entryZ && rt.lastZone !== -1) {
+        rt.lastZone = -1;
+        rt.livePos = { side: "LONG", entryPx: bar.close, entryTime: bar.time };
+        emitTriggerAlert(
+          "long",
+          "LONG BREACH",
+          bar,
+          vwapPx,
+          zVal,
+          `Px $${fmt(bar.close, digits)} breached -${fmt(state.entryZ, 2)}\u03C3 (${fmtSigned(spreadBps, 1)} bp vs 5–20m VWAP)`
+        );
+      } else if (zVal >= state.entryZ && rt.lastZone !== 1) {
+        rt.lastZone = 1;
+        rt.livePos = { side: "SHORT", entryPx: bar.close, entryTime: bar.time };
+        emitTriggerAlert(
+          "short",
+          "SHORT BREACH",
+          bar,
+          vwapPx,
+          zVal,
+          `Px $${fmt(bar.close, digits)} breached +${fmt(state.entryZ, 2)}\u03C3 (${fmtSigned(spreadBps, 1)} bp vs 5–20m VWAP)`
+        );
+      } else if (Math.abs(zVal) < state.entryZ * 0.7) {
+        rt.lastZone = 0;
+      }
+    }
+
+    // 2. VWAP Mean-Reversion Cross / Exit Trigger
+    if (rt.triggers.exit && rt.livePos && Math.abs(zVal) <= 0.25) {
+      const dir = rt.livePos.side === "LONG" ? 1 : -1;
+      const moveBps = dir * ((bar.close - rt.livePos.entryPx) / Math.max(1e-6, rt.livePos.entryPx)) * 10000;
+      const sideLbl = rt.livePos.side;
+      rt.livePos = null;
+      emitTriggerAlert(
+        "exit",
+        "VWAP REVERT EXIT",
+        bar,
+        vwapPx,
+        zVal,
+        `${sideLbl} reverted to Blended VWAP $${fmt(vwapPx, digits)} (${fmtSigned(moveBps, 1)} bp gross)`
+      );
+    }
+
+    // 3. Volume-Clock Surge Trigger
+    if (rt.triggers.surge && Number(bar.rel_vol || 1) >= 2.0 && (rt.tickCount - rt.lastSurgeTick) >= 5) {
+      rt.lastSurgeTick = rt.tickCount;
+      emitTriggerAlert(
+        "surge",
+        "VOL CLOCK SURGE",
+        bar,
+        vwapPx,
+        zVal,
+        `Rel Vol ${fmt(bar.rel_vol, 2)}\u00D7 — Adaptive blend tilted ${Math.round((bar.w5 + bar.w10) * 100)}% to 5–10m`
+      );
+    }
+  }
+
+  function appendCausalTailBar(newRawBar) {
+    const bars = RAW_SESSION.bars;
+    bars.push(newRawBar);
+    if (bars.length > 390) {
+      bars.shift();
+    }
+    const n = bars.length;
+    const meanVol = bars.reduce((s, b) => s + Number(b.volume || 1), 0) / Math.max(1, n);
+    const i = n - 1;
+    const b = bars[i];
+    const relVol = Math.max(0.25, Number(b.volume || 1) / Math.max(1e-6, meanVol));
+    const horizons = [5, 10, 15, 20];
+    const vwaps = {};
+    const sigmas = {};
+
+    for (let hi = 0; hi < horizons.length; hi++) {
+      const h = horizons[hi];
+      const start = Math.max(0, i - h + 1);
+      let sumPV = 0, sumV = 0;
+      for (let j = start; j <= i; j++) {
+        const bj = bars[j];
+        const tp = (bj.high + bj.low + bj.close) / 3;
+        const vj = Math.max(1e-6, Number(bj.volume || 1));
+        sumPV += tp * vj;
+        sumV += vj;
+      }
+      const vwapH = sumPV / Math.max(1e-9, sumV);
+      let sumVar = 0;
+      for (let j = start; j <= i; j++) {
+        const bj = bars[j];
+        const vj = Math.max(1e-6, Number(bj.volume || 1));
+        const diff = bj.close - vwapH;
+        sumVar += vj * diff * diff;
+      }
+      vwaps[h] = vwapH;
+      sigmas[h] = Math.max(b.close * 0.00025, Math.sqrt(sumVar / Math.max(1e-9, sumV)));
+    }
+
+    const volTilt = clamp((relVol - 1.0) / 1.8, -0.65, 1.25);
+    const rawW = [
+      Math.max(0.08, 0.35 + 0.16 * volTilt),
+      Math.max(0.10, 0.30 + 0.02 * volTilt),
+      Math.max(0.06, 0.20 - 0.09 * volTilt),
+      Math.max(0.04, 0.15 - 0.09 * volTilt)
+    ];
+    const wSum = rawW[0] + rawW[1] + rawW[2] + rawW[3];
+    const w5 = rawW[0] / wSum;
+    const w10 = rawW[1] / wSum;
+    const w15 = rawW[2] / wSum;
+    const w20 = rawW[3] / wSum;
+
+    const vwapStatic = 0.35 * vwaps[5] + 0.30 * vwaps[10] + 0.20 * vwaps[15] + 0.15 * vwaps[20];
+    const vwapAdaptive = w5 * vwaps[5] + w10 * vwaps[10] + w15 * vwaps[15] + w20 * vwaps[20];
+    const varWithin =
+      w5 * sigmas[5] * sigmas[5] +
+      w10 * sigmas[10] * sigmas[10] +
+      w15 * sigmas[15] * sigmas[15] +
+      w20 * sigmas[20] * sigmas[20];
+    const varBetween =
+      w5 * Math.pow(vwaps[5] - vwapAdaptive, 2) +
+      w10 * Math.pow(vwaps[10] - vwapAdaptive, 2) +
+      w15 * Math.pow(vwaps[15] - vwapAdaptive, 2) +
+      w20 * Math.pow(vwaps[20] - vwapAdaptive, 2);
+    const sigmaBlend = Math.max(b.close * 0.00025, Math.sqrt(varWithin + varBetween));
+    const zScore = (b.close - vwapAdaptive) / sigmaBlend;
+
+    bars[i] = {
+      idx: i,
+      time: b.time,
+      open: b.open,
+      high: b.high,
+      low: b.low,
+      close: b.close,
+      volume: b.volume,
+      rel_vol: Number(relVol.toFixed(3)),
+      vwap5: vwaps[5],
+      vwap10: vwaps[10],
+      vwap15: vwaps[15],
+      vwap20: vwaps[20],
+      sigma5: sigmas[5],
+      sigma10: sigmas[10],
+      sigma15: sigmas[15],
+      sigma20: sigmas[20],
+      vwap_static: vwapStatic,
+      vwap_adaptive: vwapAdaptive,
+      sigma_blend: sigmaBlend,
+      z_score: zScore,
+      w5, w10, w15, w20
+    };
+    for (let k = 0; k < n; k++) bars[k].idx = k;
+    return bars[i];
+  }
+
+  function advanceNextMinuteTime(prevTimeStr) {
+    const parts = String(prevTimeStr || "16:00").split(":");
+    let totalMin = (Number(parts[0]) || 16) * 60 + (Number(parts[1]) || 0) + 1;
+    totalMin = totalMin % (24 * 60);
+    return `${String(Math.floor(totalMin / 60)).padStart(2, "0")}:${String(totalMin % 60).padStart(2, "0")}`;
+  }
+
+  function stepSimulatedLiveTick() {
+    if (!state.rt.running || !RAW_SESSION || !RAW_SESSION.bars.length) return;
+    if (state.rt.wsConnected) return; // Live Coinbase WebSocket is driving ticks directly
+
+    state.rt.tickCount += 1;
+    const bars = RAW_SESSION.bars;
+    const last = bars[bars.length - 1];
+    const profile = getSymbolProfile(state.symbol);
+    const baseSigma = profile.volBps / 10000;
+
+    // Occasional institutional slicing burst to exercise 5-20m triggers realistically
+    const isBurst = (state.rt.tickCount % 7 === 0) || Math.random() < 0.14;
+    const burstDir = Math.random() > 0.5 ? 1 : -1;
+    const shock = (Math.random() + Math.random() + Math.random() - 1.5) * 1.4 * baseSigma;
+    state.rt.tempImpact = state.rt.tempImpact * 0.76 + (isBurst ? burstDir * baseSigma * 2.45 : 0) + shock * 0.55;
+
+    const openPx = last.close;
+    const closePx = Math.max(profile.basePx * 0.4, openPx * (1 + shock * 0.45 + state.rt.tempImpact * 0.42));
+    const wick = Math.abs(shock) * 0.9 + baseSigma * 0.35;
+    const highPx = Math.max(openPx, closePx) * (1 + wick);
+    const lowPx = Math.min(openPx, closePx) * (1 - wick);
+    const volMult = isBurst ? (2.15 + Math.random() * 1.1) : (0.72 + Math.random() * 0.65);
+    const meanVol = bars.reduce((s, b) => s + Number(b.volume || 1), 0) / Math.max(1, bars.length);
+    const volume = Math.max(10, Math.round(meanVol * volMult));
+
+    const updated = appendCausalTailBar({
+      idx: bars.length,
+      time: advanceNextMinuteTime(last.time),
+      open: Number(openPx.toFixed(4)),
+      high: Number(highPx.toFixed(4)),
+      low: Number(lowPx.toFixed(4)),
+      close: Number(closePx.toFixed(4)),
+      volume
+    });
+
+    recomputeAndRenderLab();
+    const idx = RAW_SESSION.bars.length - 1;
+    evaluateLiveTriggers(updated, state.simSeries.vwapBlend[idx], state.simSeries.zSeries[idx]);
+  }
+
+  function disconnectLiveWebSocket() {
+    if (state.rt.ws) {
+      try { state.rt.ws.close(); } catch (_err) {}
+      state.rt.ws = null;
+    }
+    state.rt.wsConnected = false;
+  }
+
+  function connectCryptoWebSocketIfApplicable() {
+    disconnectLiveWebSocket();
+    const profile = getSymbolProfile(state.symbol);
+    if (!profile.crypto || !profile.cbPair || typeof WebSocket === "undefined") return;
+
+    try {
+      const ws = new WebSocket("wss://ws-feed.exchange.coinbase.com");
+      state.rt.ws = ws;
+      ws.onopen = () => {
+        if (!state.rt.running || state.rt.ws !== ws) {
+          ws.close();
+          return;
+        }
+        state.rt.wsConnected = true;
+        ws.send(JSON.stringify({
+          type: "subscribe",
+          product_ids: [profile.cbPair],
+          channels: ["ticker"]
+        }));
+        updateLiveControlsUI();
+      };
+      ws.onmessage = evt => {
+        if (!state.rt.running || state.rt.ws !== ws) return;
+        try {
+          const msg = JSON.parse(evt.data);
+          if (msg.type !== "ticker" || !msg.price) return;
+          const px = Number(msg.price);
+          if (!Number.isFinite(px) || px <= 0) return;
+          const sz = Math.max(0.0001, Number(msg.last_size || 0.05));
+          const dt = msg.time ? new Date(msg.time) : new Date();
+          const hhmm = `${String(dt.getHours()).padStart(2, "0")}:${String(dt.getMinutes()).padStart(2, "0")}`;
+          const bars = RAW_SESSION.bars;
+          const last = bars[bars.length - 1];
+          state.rt.tickCount += 1;
+
+          if (last && last.time === hhmm) {
+            last.close = px;
+            last.high = Math.max(last.high, px);
+            last.low = Math.min(last.low, px);
+            last.volume = Number(last.volume || 0) + sz;
+            bars.pop();
+            const updated = appendCausalTailBar(last);
+            recomputeAndRenderLab();
+            const idx = RAW_SESSION.bars.length - 1;
+            evaluateLiveTriggers(updated, state.simSeries.vwapBlend[idx], state.simSeries.zSeries[idx]);
+          } else {
+            const updated = appendCausalTailBar({
+              idx: bars.length,
+              time: hhmm,
+              open: last ? last.close : px,
+              high: Math.max(last ? last.close : px, px),
+              low: Math.min(last ? last.close : px, px),
+              close: px,
+              volume: sz
+            });
+            recomputeAndRenderLab();
+            const idx = RAW_SESSION.bars.length - 1;
+            evaluateLiveTriggers(updated, state.simSeries.vwapBlend[idx], state.simSeries.zSeries[idx]);
+          }
+        } catch (_parseErr) {}
+      };
+      ws.onerror = () => {
+        state.rt.wsConnected = false;
+        updateLiveControlsUI();
+      };
+      ws.onclose = () => {
+        if (state.rt.ws === ws) {
+          state.rt.ws = null;
+          state.rt.wsConnected = false;
+          updateLiveControlsUI();
+        }
+      };
+    } catch (_err) {
+      state.rt.wsConnected = false;
+    }
+  }
+
+  function updateLiveControlsUI() {
+    const btn = $("btnLiveToggle");
+    const lbl = $("btnLiveLabel");
+    const badge = $("rtStatusBadge");
+    if (btn) btn.classList.toggle("running", state.rt.running);
+    if (lbl) lbl.textContent = state.rt.running ? "Pause Live" : "Start Live";
+    if (badge) {
+      badge.textContent = state.rt.running
+        ? (state.rt.wsConnected ? "Live WS" : `Live ${(state.rt.cadenceMs / 1000).toFixed(1)}s`)
+        : "Paused";
+      badge.classList.toggle("live", state.rt.running);
+    }
+    updateLiveTelemetry();
+  }
+
+  function startLiveStream() {
+    if (state.rt.running) return;
+    // Clone benchmark session before mutating bars so ES benchmark remains untouched on reset
+    if (RAW_SESSION === BENCHMARK_SESSION && BENCHMARK_SESSION) {
+      RAW_SESSION = {
+        ...BENCHMARK_SESSION,
+        bars: BENCHMARK_SESSION.bars.map(b => ({ ...b })),
+        trades: []
+      };
+      state.symbolSource = "live-sim";
+    }
+    state.rt.running = true;
+    state.zoom = "close"; // Focus tail so incoming live candles are immediately visible
+    document.querySelectorAll("#zoomPills .pill-btn").forEach(b =>
+      b.classList.toggle("active", b.dataset.zoom === state.zoom)
+    );
+    updateLiveControlsUI();
+    connectCryptoWebSocketIfApplicable();
+    if (state.rt.timerId) clearInterval(state.rt.timerId);
+    state.rt.timerId = setInterval(stepSimulatedLiveTick, state.rt.cadenceMs);
+    recomputeAndRenderLab();
+  }
+
+  function stopLiveStream() {
+    state.rt.running = false;
+    if (state.rt.timerId) {
+      clearInterval(state.rt.timerId);
+      state.rt.timerId = null;
+    }
+    disconnectLiveWebSocket();
+    updateLiveControlsUI();
+  }
+
+  function triggerSampleAlert() {
+    if (!RAW_SESSION || !RAW_SESSION.bars.length || !state.simSeries) return;
+    const idx = RAW_SESSION.bars.length - 1;
+    const bar = RAW_SESSION.bars[idx];
+    const vwap = state.simSeries.vwapBlend[idx];
+    const zVal = state.simSeries.zSeries[idx];
+    const isLong = zVal <= 0;
+    const sampleZ = isLong ? -(state.entryZ + 0.14) : (state.entryZ + 0.14);
+    emitTriggerAlert(
+      isLong ? "long" : "short",
+      isLong ? "LONG BREACH (TEST)" : "SHORT BREACH (TEST)",
+      bar,
+      vwap,
+      sampleZ,
+      `Test notification fired for ${state.symbol} at $${fmt(bar.close, bar.close >= 1000 ? 1 : 2)} (threshold ±${fmt(state.entryZ, 2)}\u03C3)`
+    );
   }
 
   /* ---------- Causal Intraday Re-Calculation Engine ---------- */
@@ -692,6 +1250,8 @@
 
     const isDefaultAdaptive =
       state.symbol === "ES" &&
+      !state.rt.running &&
+      state.symbolSource === "benchmark" &&
       state.preset === "adaptive" &&
       Math.abs(state.entryZ - state.defaultEntryZ) < 1e-6 &&
       state.maxHold === state.defaultMaxHold;
@@ -939,6 +1499,8 @@
     let netSharpeDisp = "—";
     const isDefaultAdaptive =
       state.symbol === "ES" &&
+      !state.rt.running &&
+      state.symbolSource === "benchmark" &&
       state.preset === "adaptive" &&
       Math.abs(state.entryZ - state.defaultEntryZ) < 1e-6 &&
       state.maxHold === state.defaultMaxHold;
@@ -986,6 +1548,7 @@
 
     $("zoomRangeLabel").textContent = bounds.shortRange;
     $("chartWindowCaption").textContent = `${bounds.label} · ${PRESETS[state.preset].short}`;
+    updateLiveTelemetry();
   }
 
   function computeImpliedSharpe(trades) {
@@ -2425,6 +2988,71 @@
       });
     }
 
+    // Real-time stream & alert notification controls
+    const btnLive = $("btnLiveToggle");
+    if (btnLive) {
+      btnLive.addEventListener("click", () => {
+        if (state.rt.running) stopLiveStream();
+        else startLiveStream();
+      });
+    }
+    document.querySelectorAll("#rtSpeedGroup .rt-speed-btn").forEach(btn => {
+      btn.addEventListener("click", () => {
+        state.rt.cadenceMs = Number(btn.dataset.ms) || 1000;
+        document.querySelectorAll("#rtSpeedGroup .rt-speed-btn").forEach(b =>
+          b.classList.toggle("active", b === btn)
+        );
+        if (state.rt.running) {
+          if (state.rt.timerId) clearInterval(state.rt.timerId);
+          state.rt.timerId = setInterval(stepSimulatedLiveTick, state.rt.cadenceMs);
+        }
+        updateLiveControlsUI();
+      });
+    });
+    const btnTest = $("btnTestAlert");
+    if (btnTest) btnTest.addEventListener("click", triggerSampleAlert);
+
+    const btnClearAlerts = $("btnClearAlerts");
+    if (btnClearAlerts) {
+      btnClearAlerts.addEventListener("click", () => {
+        state.rt.alerts = [];
+        renderAlertLog();
+      });
+    }
+
+    const bindChk = (id, fn) => {
+      const el = $(id);
+      if (el) el.addEventListener("change", evt => fn(Boolean(evt.target.checked), el));
+    };
+    bindChk("chkTrigBreach", v => { state.rt.triggers.breach = v; });
+    bindChk("chkTrigExit", v => { state.rt.triggers.exit = v; });
+    bindChk("chkTrigSurge", v => { state.rt.triggers.surge = v; });
+    bindChk("chkAlertToast", v => { state.rt.channels.toast = v; });
+    bindChk("chkAlertSound", v => { state.rt.channels.sound = v; });
+    bindChk("chkAlertDesktop", async (v, el) => {
+      if (!v) {
+        state.rt.channels.desktop = false;
+        return;
+      }
+      if (typeof Notification === "undefined") {
+        el.checked = false;
+        state.rt.channels.desktop = false;
+        showToast({ kind: "exit", symbol: state.symbol, label: "DESKTOP UNSUPPORTED", time: "Now", detail: "This browser does not support Desktop Notifications." });
+        return;
+      }
+      if (Notification.permission === "granted") {
+        state.rt.channels.desktop = true;
+      } else if (Notification.permission !== "denied") {
+        const perm = await Notification.requestPermission();
+        state.rt.channels.desktop = perm === "granted";
+        el.checked = state.rt.channels.desktop;
+      } else {
+        el.checked = false;
+        state.rt.channels.desktop = false;
+        showToast({ kind: "exit", symbol: state.symbol, label: "PERMISSION BLOCKED", time: "Now", detail: "Enable browser notifications in site settings to receive desktop pushes." });
+      }
+    });
+
     // Presets
     document.querySelectorAll("#presetGrid .preset-btn").forEach(btn => {
       btn.addEventListener("click", () => applyPreset(btn.dataset.preset));
@@ -2604,6 +3232,12 @@
     renderWeightScheduleChart();
     renderDurationChart();
     renderBenchmarkTable();
+
+    if (new URLSearchParams(window.location.search).get("live") === "1") {
+      startLiveStream();
+    } else {
+      updateLiveControlsUI();
+    }
 
     switchTab(initialTab);
   }

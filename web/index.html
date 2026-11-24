@@ -36,6 +36,10 @@
     </nav>
 
     <div class="topbar-actions">
+      <button class="btn-live-toggle" id="btnLiveToggle" title="Start or pause real-time 5–20m VWAP streaming">
+        <span class="live-dot" id="topbarLiveDot"></span>
+        <span id="btnLiveLabel">Start Live</span>
+      </button>
       <span class="meta-pill num" id="topbarMeta">60 Sessions · 23,400 Bars</span>
       <button class="btn-sheet-quick" id="btnQuickSheet" title="Open Editorial Blue Sheet">
         <svg width="13" height="13" viewBox="0 0 16 16" fill="none" aria-hidden="true">
@@ -172,6 +176,30 @@
                 <button type="button" class="sym-chip" data-symbol="TSLA">TSLA</button>
                 <button type="button" class="sym-chip" data-symbol="MSFT">MSFT</button>
                 <button type="button" class="sym-chip" data-symbol="BTC-USD">BTC-USD</button>
+              </div>
+            </div>
+
+            <!-- Real-Time Stream & Trigger Notifications -->
+            <div class="dock-section">
+              <div class="dock-label-row">
+                <span class="dock-heading">Real-Time &amp; Alerts</span>
+                <span class="dock-badge" id="rtStatusBadge">Paused</span>
+              </div>
+              <div class="rt-controls-row">
+                <div class="rt-speed-group" id="rtSpeedGroup" role="group" aria-label="Stream cadence">
+                  <button type="button" class="rt-speed-btn" data-ms="500">0.5s</button>
+                  <button type="button" class="rt-speed-btn active" data-ms="1000">1s</button>
+                  <button type="button" class="rt-speed-btn" data-ms="2000">2s</button>
+                </div>
+                <button type="button" class="btn-test-alert" id="btnTestAlert" title="Trigger a sample toast, sound chime, and desktop alert">Test Alert</button>
+              </div>
+              <div class="toggle-grid">
+                <label class="toggle-chip"><input type="checkbox" id="chkTrigBreach" checked> Band Breach</label>
+                <label class="toggle-chip"><input type="checkbox" id="chkTrigExit" checked> VWAP Cross</label>
+                <label class="toggle-chip"><input type="checkbox" id="chkTrigSurge" checked> Vol Surge &ge;2&times;</label>
+                <label class="toggle-chip"><input type="checkbox" id="chkAlertToast" checked> Toasts</label>
+                <label class="toggle-chip"><input type="checkbox" id="chkAlertSound" checked> Sound Chime</label>
+                <label class="toggle-chip"><input type="checkbox" id="chkAlertDesktop"> Desktop Push</label>
               </div>
             </div>
 
@@ -329,6 +357,16 @@
               </div>
             </div>
 
+            <div class="live-telemetry-bar num" id="liveTelemetryBar">
+              <span class="tel-pill" id="telStatusPill"><i class="live-dot sm"></i><span id="telStatusText">STATIC SNAPSHOT</span></span>
+              <span class="tel-item"><small>LAST</small><strong id="telLastPx">—</strong></span>
+              <span class="tel-item"><small>BLENDED VWAP</small><strong id="telVwapPx">—</strong></span>
+              <span class="tel-item"><small>DEV</small><strong id="telSpreadBps">—</strong></span>
+              <span class="tel-item"><small>LIVE Z</small><strong class="tel-z" id="telLiveZ">—</strong></span>
+              <span class="tel-item"><small>REL VOL</small><strong id="telRelVol">—</strong></span>
+              <span class="tel-signal" id="telSignalState">WATCHING</span>
+            </div>
+
             <div class="chart-stage" id="chartStage">
               <svg id="intradayChart" class="chart-svg" viewBox="0 0 1080 462" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Intraday Blended 5-20m VWAP chart with volume clock and Z-score panel"></svg>
               <div id="chartTooltip" class="inspector-tooltip"></div>
@@ -364,6 +402,40 @@
                     </tr>
                   </thead>
                   <tbody id="tradeTapeBody"></tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+          <!-- Live Signal Trigger Log Card -->
+          <div class="card">
+            <div class="card-header">
+              <div class="card-title-group">
+                <h2 class="card-title">Live Signal &amp; Trigger Log</h2>
+                <span class="dock-badge num" id="alertCountBadge">0 alerts</span>
+                <span class="card-subtitle" id="alertLogSubtitle">Real-time band breaches, VWAP reversion crosses, and volume-clock surges</span>
+              </div>
+              <button class="pill-btn" id="btnClearAlerts">Clear Log</button>
+            </div>
+            <div class="tape-card-body">
+              <div class="table-scroll alert-scroll">
+                <table class="booktabs" id="alertLogTable">
+                  <thead>
+                    <tr>
+                      <th class="left">Time</th>
+                      <th class="left">Symbol</th>
+                      <th class="center">Trigger</th>
+                      <th>Price</th>
+                      <th>Blended VWAP</th>
+                      <th>z-Score</th>
+                      <th>Rel Vol</th>
+                      <th class="left">Detail</th>
+                    </tr>
+                  </thead>
+                  <tbody id="alertLogBody">
+                    <tr class="empty-alert-row">
+                      <td colspan="8" class="center">Click <strong>Start Live</strong> or <strong>Test Alert</strong> to stream real-time 5–20m VWAP triggers.</td>
+                    </tr>
+                  </tbody>
                 </table>
               </div>
             </div>
@@ -499,6 +571,8 @@
       </div>
     </section>
   </main>
+
+  <div id="toastContainer" class="toast-container" aria-live="polite" aria-atomic="false"></div>
 
   <script src="../data/bundle.js"></script>
   <script src="app.js"></script>

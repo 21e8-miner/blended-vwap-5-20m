@@ -1195,6 +1195,305 @@ table.booktabs tbody tr.flagship-row td {
   background: var(--white);
 }
 
+/* ---------- Real-Time Controls, Telemetry & Notifications ---------- */
+.btn-live-toggle {
+  appearance: none;
+  background: rgba(14, 106, 104, 0.18);
+  color: #D9F7F5;
+  border: 1px solid rgba(72, 209, 204, 0.45);
+  font-family: var(--font-sans);
+  font-size: 12px;
+  font-weight: 600;
+  padding: 5.5px 11px;
+  border-radius: 5px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  transition: all 0.15s ease;
+  white-space: nowrap;
+}
+
+.btn-live-toggle:hover {
+  background: rgba(14, 106, 104, 0.34);
+  color: var(--white);
+}
+
+.btn-live-toggle.running {
+  background: #0E6A68;
+  border-color: #4AD6D1;
+  color: var(--white);
+  box-shadow: 0 0 0 2px rgba(74, 214, 209, 0.2);
+}
+
+.live-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #7CA2CA;
+  display: inline-block;
+  flex-shrink: 0;
+}
+
+.live-dot.sm {
+  width: 6px;
+  height: 6px;
+}
+
+.btn-live-toggle.running .live-dot,
+.tel-pill.live .live-dot {
+  background: #4CF0E5;
+  box-shadow: 0 0 0 0 rgba(76, 240, 229, 0.7);
+  animation: livePulse 1.6s infinite;
+}
+
+@keyframes livePulse {
+  0% { box-shadow: 0 0 0 0 rgba(76, 240, 229, 0.65); }
+  70% { box-shadow: 0 0 0 6px rgba(76, 240, 229, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(76, 240, 229, 0); }
+}
+
+.rt-controls-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+}
+
+.rt-speed-group {
+  display: inline-flex;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  overflow: hidden;
+  background: var(--porcelain);
+}
+
+.rt-speed-btn {
+  appearance: none;
+  border: none;
+  border-right: 1px solid var(--border);
+  background: transparent;
+  color: var(--ink-body);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  font-weight: 600;
+  padding: 4px 8px;
+  cursor: pointer;
+}
+
+.rt-speed-btn:last-child {
+  border-right: none;
+}
+
+.rt-speed-btn.active {
+  background: var(--cobalt);
+  color: var(--white);
+}
+
+.btn-test-alert {
+  appearance: none;
+  border: 1px solid var(--border-strong);
+  background: var(--ice-soft);
+  color: var(--navy);
+  font-family: var(--font-sans);
+  font-size: 11px;
+  font-weight: 600;
+  padding: 4px 9px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.12s ease;
+}
+
+.btn-test-alert:hover {
+  background: var(--ice);
+  border-color: var(--cobalt);
+  color: var(--cobalt);
+}
+
+/* Live Telemetry Strip inside Intraday Chart Card */
+.live-telemetry-bar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 14px;
+  padding: 6px 14px;
+  background: var(--porcelain);
+  border-bottom: 1px solid var(--border);
+  font-size: 11.5px;
+}
+
+.tel-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  color: var(--ink-muted);
+  background: var(--white);
+  border: 1px solid var(--border);
+  padding: 2px 8px;
+  border-radius: 99px;
+}
+
+.tel-pill.live {
+  color: var(--long);
+  background: var(--long-bg);
+  border-color: #A9DAD7;
+}
+
+.tel-item {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 5px;
+}
+
+.tel-item small {
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  color: var(--ink-muted);
+}
+
+.tel-item strong {
+  font-size: 12px;
+  color: var(--navy);
+}
+
+.tel-z.zone-long {
+  color: var(--long);
+}
+
+.tel-z.zone-short {
+  color: var(--short);
+}
+
+.tel-signal {
+  margin-left: auto;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  padding: 2px 8px;
+  border-radius: 3px;
+  background: var(--ice);
+  color: var(--cobalt);
+  border: 1px solid #CFE0F4;
+}
+
+.tel-signal.long {
+  background: var(--long-bg);
+  color: var(--long);
+  border-color: #A9DAD7;
+}
+
+.tel-signal.short {
+  background: var(--short-bg);
+  color: var(--short);
+  border-color: #E7BAC0;
+}
+
+/* Alert Log Table */
+.alert-scroll {
+  max-height: 155px;
+}
+
+.empty-alert-row td {
+  color: var(--ink-muted);
+  font-style: italic;
+  padding: 12px 8px;
+}
+
+.trig-badge {
+  display: inline-block;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  padding: 1.5px 6px;
+  border-radius: 3px;
+  white-space: nowrap;
+}
+
+.trig-badge.long {
+  background: var(--long-bg);
+  color: var(--long);
+}
+
+.trig-badge.short {
+  background: var(--short-bg);
+  color: var(--short);
+}
+
+.trig-badge.surge {
+  background: var(--ice);
+  color: var(--cobalt);
+}
+
+.trig-badge.exit {
+  background: #EEF2F7;
+  color: var(--navy);
+}
+
+/* Floating Quant Blue Toast Notifications */
+.toast-container {
+  position: fixed;
+  top: 64px;
+  right: 18px;
+  z-index: 90;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 318px;
+  pointer-events: none;
+}
+
+.toast-card {
+  pointer-events: auto;
+  background: var(--white);
+  border: 1px solid var(--border-strong);
+  border-left: 4px solid var(--cobalt);
+  border-radius: 6px;
+  box-shadow: var(--shadow-float);
+  padding: 9px 12px;
+  cursor: pointer;
+  animation: toastSlideIn 0.2s ease-out;
+}
+
+.toast-card.long { border-left-color: var(--long); }
+.toast-card.short { border-left-color: var(--short); }
+.toast-card.surge { border-left-color: var(--cobalt); }
+.toast-card.exit { border-left-color: var(--navy); }
+
+@keyframes toastSlideIn {
+  from { opacity: 0; transform: translateX(18px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+
+.toast-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 3px;
+}
+
+.toast-title {
+  font-family: var(--font-serif);
+  font-size: 12.5px;
+  font-weight: 700;
+  color: var(--navy);
+}
+
+.toast-time {
+  font-size: 10px;
+  color: var(--ink-muted);
+}
+
+.toast-body {
+  font-size: 11.5px;
+  color: var(--ink-body);
+  line-height: 1.35;
+}
+
 /* ---------- Empty / Error Banner ---------- */
 .data-banner {
   background: #FFF9EB;
