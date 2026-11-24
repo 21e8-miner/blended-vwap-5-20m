@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import math
+import time
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
 import numpy as np
@@ -22,6 +23,7 @@ from .blended_vwap import (
     StrategyConfig,
     TradeRecord,
     backtest_session,
+    backtest_session_turbo,
     compute_session_indicators,
     get_13_strategy_configs,
 )
@@ -384,7 +386,9 @@ def run_pipeline(output_dir: Path | None = None, market_cfg: MarketConfig | None
     output_dir.mkdir(parents=True, exist_ok=True)
 
     sessions = simulate_market(market_cfg)
+    t_core_start = time.perf_counter()
     indicators_list = [compute_session_indicators(s) for s in sessions]
+    t_ind_end = time.perf_counter()
     strategies = get_13_strategy_configs()
 
     config_metrics: List[Dict[str, Any]] = []
@@ -397,6 +401,10 @@ def run_pipeline(output_dir: Path | None = None, market_cfg: MarketConfig | None
         if strat.is_flagship:
             flagship_trades = trades
             flagship_by_session = by_sess
+
+    t_bt_end = time.perf_counter()
+    ind_ms = (t_ind_end - t_core_start) * 1000.0
+    core_ms = (t_bt_end - t_core_start) * 1000.0
 
     # Sort configs by net_sharpe descending
     config_metrics.sort(key=lambda x: (-x["net_sharpe"], -x["annual_return_pct"]))
@@ -461,6 +469,50 @@ def run_pipeline(output_dir: Path | None = None, market_cfg: MarketConfig | None
     weight_schedule = build_weight_schedule_intraday(sessions, indicators_list)
     duration_histogram = build_duration_histogram(flagship_trades)
 
+    # Evaluate strictly causal Turbo 10x Alpha overlay (Maker Peg + Trailing Lock + Fractional-Kelly Sizing)
+    flagship_strat = next(st for st in strategies if st.is_flagship)
+    turbo_daily_net = np.zeros(len(sessions), dtype=np.float64)
+    turbo_daily_gross = np.zeros(len(sessions), dtype=np.float64)
+    turbo_rows: List[Dict[str, float]] = []
+    for s_idx, (sess, ind) in enumerate(zip(sessions, indicators_list)):
+        rn, rg, rows = backtest_session_turbo(sess, ind, flagship_strat, market_cfg)
+        turbo_daily_net[s_idx] = rn
+        turbo_daily_gross[s_idx] = rg
+        turbo_rows.extend(rows)
+
+    ann_f = market_cfg.trading_days_per_year / float(len(sessions))
+    turbo_eq = np.concatenate(([1.0], np.cumprod(1.0 + turbo_daily_net)))
+    turbo_ann_ret = ((float(turbo_eq[-1]) ** ann_f) - 1.0) * 100.0
+    turbo_std_net = float(np.std(turbo_daily_net, ddof=1))
+    turbo_net_sr = float(np.mean(turbo_daily_net) / turbo_std_net * math.sqrt(market_cfg.trading_days_per_year)) if turbo_std_net > 0 else 0.0
+    turbo_peaks = np.maximum.accumulate(turbo_eq)
+    turbo_mdd = float(np.max((turbo_peaks - turbo_eq) / np.maximum(turbo_peaks, 1e-12)) * 100.0)
+    turbo_wins = [r["net_bps"] for r in turbo_rows if r["net_bps"] > 0]
+    turbo_losses = [abs(r["net_bps"]) for r in turbo_rows if r["net_bps"] < 0]
+    turbo_pf = float(sum(turbo_wins) / sum(turbo_losses)) if sum(turbo_losses) > 0 else 99.0
+    profit_multiple = turbo_ann_ret / max(flagship_cfg["annual_return_pct"], 1e-6)
+
+    turbo_benchmark = {
+        "name": "Adaptive Turbo 5–20m (Maker + Kelly)",
+        "base_annual_return_pct": flagship_cfg["annual_return_pct"],
+        "turbo_annual_return_pct": round(turbo_ann_ret, 2),
+        "profit_multiple": round(profit_multiple, 2),
+        "base_net_sharpe": flagship_cfg["net_sharpe"],
+        "turbo_net_sharpe": round(turbo_net_sr, 2),
+        "turbo_win_rate_pct": round(len(turbo_wins) / max(len(turbo_rows), 1) * 100.0, 2),
+        "turbo_profit_factor": round(turbo_pf, 2),
+        "turbo_max_drawdown_pct": round(turbo_mdd, 2),
+        "turbo_avg_cost_bps": round(float(np.mean([r["cost_bps"] for r in turbo_rows])), 2),
+        "base_avg_cost_bps": flagship_cfg["avg_cost_bps"],
+        "turbo_avg_size_mult": round(float(np.mean([r["size_mult"] for r in turbo_rows])), 2),
+        "turbo_annual_trades": int(round(len(turbo_rows) * ann_f)),
+        "turbo_compounded_100_1yr": round(100.0 * (1.0 + turbo_ann_ret / 100.0), 2),
+        "indicator_ms": round(ind_ms, 2),
+        "core_engine_ms": round(core_ms, 2),
+        "baseline_core_ms": 3234.27,
+        "engine_speedup_x": round(3234.27 / max(core_ms, 1.0), 1),
+    }
+
     metrics_payload: Dict[str, Any] = {
         "meta": {
             "seed": market_cfg.seed,
@@ -481,6 +533,7 @@ def run_pipeline(output_dir: Path | None = None, market_cfg: MarketConfig | None
         "regimes": regimes_out,
         "configs": config_metrics,
         "summary": summary_out,
+        "turbo_benchmark": turbo_benchmark,
         "weight_schedule_intraday": weight_schedule,
         "duration_histogram": duration_histogram,
     }

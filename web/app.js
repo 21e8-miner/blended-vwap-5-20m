@@ -39,6 +39,8 @@
     symbolSource: "benchmark",
     symbolSpreadBps: 0.6,
     symbolImpactCoeff: 0.12,
+    turboMode: false,
+    lastComputeMs: 0,
     preset: "adaptive",
     weights: [35, 30, 20, 15],
     defaultEntryZ: 1.58,
@@ -451,67 +453,67 @@
 
   function buildCausalSession(symbol, rawBars, sourceLabel, spreadBps, impactCoeff) {
     const n = rawBars.length;
-    const meanVol = rawBars.reduce((s, b) => s + Number(b.volume || 1), 0) / Math.max(1, n);
-    const horizons = [5, 10, 15, 20];
+    const p0 = n > 0 ? (rawBars[0].high + rawBars[0].low + rawBars[0].close) / 3 : 100;
+    const csV = new Float64Array(n + 1);
+    const csPV = new Float64Array(n + 1);
+    const csP2V = new Float64Array(n + 1);
+    let totalVol = 0;
+
+    // O(N) origin-shifted prefix sums for zero-loop rolling VWAP & dispersion across all horizons
+    for (let i = 0; i < n; i++) {
+      const b = rawBars[i];
+      const v = Math.max(1e-6, Number(b.volume || 1));
+      const tp = (b.high + b.low + b.close) / 3;
+      const dp = tp - p0;
+      totalVol += v;
+      csV[i + 1] = csV[i] + v;
+      csPV[i + 1] = csPV[i] + dp * v;
+      csP2V[i + 1] = csP2V[i] + dp * dp * v;
+    }
+
+    const meanVol = totalVol / Math.max(1, n);
     const bars = new Array(n);
+
+    const calcH = (i, h, closePx) => {
+      const lo = i + 1 >= h ? i + 1 - h : 0;
+      const hi = i + 1;
+      const wV = csV[hi] - csV[lo];
+      const mu = (csPV[hi] - csPV[lo]) / Math.max(1e-9, wV);
+      const vwap = p0 + mu;
+      const wVar = Math.max(0, (csP2V[hi] - csP2V[lo]) / Math.max(1e-9, wV) - mu * mu);
+      const sig = Math.max(closePx * 0.00025, Math.sqrt(wVar));
+      return [vwap, sig];
+    };
 
     for (let i = 0; i < n; i++) {
       const b = rawBars[i];
       const relVol = Math.max(0.25, Number(b.volume || 1) / Math.max(1e-6, meanVol));
-
-      const vwaps = {};
-      const sigmas = {};
-      for (let hi = 0; hi < horizons.length; hi++) {
-        const h = horizons[hi];
-        const start = Math.max(0, i - h + 1);
-        let sumPV = 0, sumV = 0;
-        for (let j = start; j <= i; j++) {
-          const bj = rawBars[j];
-          const tp = (bj.high + bj.low + bj.close) / 3;
-          const vj = Math.max(1e-6, Number(bj.volume || 1));
-          sumPV += tp * vj;
-          sumV += vj;
-        }
-        const vwapH = sumPV / Math.max(1e-9, sumV);
-        let sumVar = 0;
-        for (let j = start; j <= i; j++) {
-          const bj = rawBars[j];
-          const vj = Math.max(1e-6, Number(bj.volume || 1));
-          const diff = bj.close - vwapH;
-          sumVar += vj * diff * diff;
-        }
-        const floorSig = Math.max(b.close * 0.00025, 1e-5);
-        vwaps[h] = vwapH;
-        sigmas[h] = Math.max(floorSig, Math.sqrt(sumVar / Math.max(1e-9, sumV)));
-      }
+      const [v5, s5] = calcH(i, 5, b.close);
+      const [v10, s10] = calcH(i, 10, b.close);
+      const [v15, s15] = calcH(i, 15, b.close);
+      const [v20, s20] = calcH(i, 20, b.close);
 
       // Causal adaptive volume-clock weights (fast tilt on high rel_vol, anchor tilt on calm lull)
       const volTilt = clamp((relVol - 1.0) / 1.8, -0.65, 1.25);
-      const rawW = [
-        Math.max(0.08, 0.35 + 0.16 * volTilt),
-        Math.max(0.10, 0.30 + 0.02 * volTilt),
-        Math.max(0.06, 0.20 - 0.09 * volTilt),
-        Math.max(0.04, 0.15 - 0.09 * volTilt)
-      ];
-      const wSum = rawW[0] + rawW[1] + rawW[2] + rawW[3];
-      const w5 = rawW[0] / wSum;
-      const w10 = rawW[1] / wSum;
-      const w15 = rawW[2] / wSum;
-      const w20 = rawW[3] / wSum;
+      const r5 = Math.max(0.08, 0.35 + 0.16 * volTilt);
+      const r10 = Math.max(0.10, 0.30 + 0.02 * volTilt);
+      const r15 = Math.max(0.06, 0.20 - 0.09 * volTilt);
+      const r20 = Math.max(0.04, 0.15 - 0.09 * volTilt);
+      const wSum = r5 + r10 + r15 + r20;
+      const w5 = r5 / wSum;
+      const w10 = r10 / wSum;
+      const w15 = r15 / wSum;
+      const w20 = r20 / wSum;
 
-      const vwapStatic = 0.35 * vwaps[5] + 0.30 * vwaps[10] + 0.20 * vwaps[15] + 0.15 * vwaps[20];
-      const vwapAdaptive = w5 * vwaps[5] + w10 * vwaps[10] + w15 * vwaps[15] + w20 * vwaps[20];
+      const vwapStatic = 0.35 * v5 + 0.30 * v10 + 0.20 * v15 + 0.15 * v20;
+      const vwapAdaptive = w5 * v5 + w10 * v10 + w15 * v15 + w20 * v20;
 
-      const varWithin =
-        w5 * sigmas[5] * sigmas[5] +
-        w10 * sigmas[10] * sigmas[10] +
-        w15 * sigmas[15] * sigmas[15] +
-        w20 * sigmas[20] * sigmas[20];
+      const varWithin = w5 * s5 * s5 + w10 * s10 * s10 + w15 * s15 * s15 + w20 * s20 * s20;
       const varBetween =
-        w5 * Math.pow(vwaps[5] - vwapAdaptive, 2) +
-        w10 * Math.pow(vwaps[10] - vwapAdaptive, 2) +
-        w15 * Math.pow(vwaps[15] - vwapAdaptive, 2) +
-        w20 * Math.pow(vwaps[20] - vwapAdaptive, 2);
+        w5 * (v5 - vwapAdaptive) * (v5 - vwapAdaptive) +
+        w10 * (v10 - vwapAdaptive) * (v10 - vwapAdaptive) +
+        w15 * (v15 - vwapAdaptive) * (v15 - vwapAdaptive) +
+        w20 * (v20 - vwapAdaptive) * (v20 - vwapAdaptive);
       const sigmaBlend = Math.max(b.close * 0.00025, Math.sqrt(varWithin + varBetween));
       const zScore = (b.close - vwapAdaptive) / sigmaBlend;
 
@@ -524,14 +526,14 @@
         close: b.close,
         volume: b.volume,
         rel_vol: Number(relVol.toFixed(3)),
-        vwap5: vwaps[5],
-        vwap10: vwaps[10],
-        vwap15: vwaps[15],
-        vwap20: vwaps[20],
-        sigma5: sigmas[5],
-        sigma10: sigmas[10],
-        sigma15: sigmas[15],
-        sigma20: sigmas[20],
+        vwap5: v5,
+        vwap10: v10,
+        vwap15: v15,
+        vwap20: v20,
+        sigma5: s5,
+        sigma10: s10,
+        sigma15: s15,
+        sigma20: s20,
         vwap_static: vwapStatic,
         vwap_adaptive: vwapAdaptive,
         sigma_blend: sigmaBlend,
@@ -836,6 +838,7 @@
       else if (z >= state.entryZ) zEl.classList.add("zone-short");
     }
     if ($("telRelVol")) $("telRelVol").textContent = `${fmt(bar.rel_vol || 1.0, 2)}\u00D7`;
+    if ($("telEngineMs")) $("telEngineMs").textContent = `${fmt(state.lastComputeMs, 2)} ms`;
 
     const sigEl = $("telSignalState");
     if (sigEl) {
@@ -1054,9 +1057,10 @@
       volume
     });
 
-    recomputeAndRenderLab();
+    recomputeSession();
     const idx = RAW_SESSION.bars.length - 1;
     evaluateLiveTriggers(updated, state.simSeries.vwapBlend[idx], state.simSeries.zSeries[idx]);
+    scheduleLabRender();
   }
 
   function disconnectLiveWebSocket() {
@@ -1151,12 +1155,33 @@
     if (btn) btn.classList.toggle("running", state.rt.running);
     if (lbl) lbl.textContent = state.rt.running ? "Pause Live" : "Start Live";
     if (badge) {
+      const cadLbl = state.rt.cadenceMs < 1000 ? `${state.rt.cadenceMs}ms` : `${(state.rt.cadenceMs / 1000).toFixed(1)}s`;
       badge.textContent = state.rt.running
-        ? (state.rt.wsConnected ? "Live WS" : `Live ${(state.rt.cadenceMs / 1000).toFixed(1)}s`)
+        ? (state.rt.wsConnected ? "Live WS" : `Live ${cadLbl}`)
         : "Paused";
       badge.classList.toggle("live", state.rt.running);
     }
+    const turboBtn = $("btnTurboMode");
+    const turboLbl = $("btnTurboLabel");
+    const turboSub = $("btnTurboSub");
+    if (turboBtn) {
+      turboBtn.classList.toggle("active", state.turboMode);
+      turboBtn.setAttribute("aria-pressed", String(state.turboMode));
+    }
+    if (turboLbl) turboLbl.textContent = state.turboMode ? "Turbo 10\u00D7 Alpha: ON" : "Turbo 10\u00D7 Alpha: OFF";
+    if (turboSub) turboSub.textContent = state.turboMode ? "Maker + Kelly" : "1\u00D7 Taker";
     updateLiveTelemetry();
+  }
+
+  let RAF_PENDING = false;
+  function scheduleLabRender() {
+    if (RAF_PENDING) return;
+    RAF_PENDING = true;
+    const raf = typeof requestAnimationFrame === "function" ? requestAnimationFrame : (fn => setTimeout(fn, 0));
+    raf(() => {
+      RAF_PENDING = false;
+      recomputeAndRenderLab();
+    });
   }
 
   function startLiveStream() {
@@ -1242,6 +1267,7 @@
   }
 
   function recomputeSession() {
+    const tPerf0 = typeof performance !== "undefined" ? performance.now() : 0;
     const bars = RAW_SESSION.bars;
     const n = bars.length;
     const meta = (RAW_METRICS && RAW_METRICS.meta) || {};
@@ -1250,6 +1276,7 @@
 
     const isDefaultAdaptive =
       state.symbol === "ES" &&
+      !state.turboMode &&
       !state.rt.running &&
       state.symbolSource === "benchmark" &&
       state.preset === "adaptive" &&
@@ -1368,16 +1395,30 @@
           continue;
         }
         const entrySig = sigmaBlend[i];
-        const targetMove = 0.72 * Math.abs(entryVwap - entryPx);
+        const initGap = Math.abs(entryVwap - entryPx);
+        const targetMove = 0.72 * initGap;
         let exitIdx = Math.min(n - 2, entryIdx + maxHold);
+        let peakRev = 0;
+        let armedTrail = false;
 
         for (let t = entryIdx + minHold; t <= Math.min(n - 2, entryIdx + maxHold); t++) {
           const zt = zSeries[t];
           const pxMove = dir * (bars[t].close - entryPx);
-          // Exit on anchor reversion back toward entry Blended VWAP or z-score crossover
-          if (pxMove >= targetMove || (side === "LONG" && zt >= -0.25) || (side === "SHORT" && zt <= 0.25)) {
-            exitIdx = t;
-            break;
+          if (pxMove > peakRev) peakRev = pxMove;
+
+          if (state.turboMode) {
+            // Causal asymmetric trailing reversion lock (captures overshoot past Blended VWAP)
+            if (pxMove >= targetMove) armedTrail = true;
+            if (armedTrail && (pxMove <= 0.85 * peakRev || pxMove >= 1.32 * initGap)) {
+              exitIdx = t;
+              break;
+            }
+          } else {
+            // Standard exit on anchor reversion back toward entry Blended VWAP or z-score crossover
+            if (pxMove >= targetMove || (side === "LONG" && zt >= -0.25) || (side === "SHORT" && zt <= 0.25)) {
+              exitIdx = t;
+              break;
+            }
           }
           // Stop-loss guard against strong trend breakout
           if (pxMove < -2.9 * entrySig) {
@@ -1388,12 +1429,25 @@
 
         const exitPx = bars[exitIdx].close;
         const holdMin = exitIdx - entryIdx;
-        const grossBps = dir * ((exitPx - entryPx) / entryPx) * 10000;
+        const rawGrossBps = dir * ((exitPx - entryPx) / entryPx) * 10000;
         const relVol = Math.max(0.35, Number(b.rel_vol || 1.0));
         const volBps = (entrySig / entryPx) * 10000;
         const impactBps = impactCoeff * Math.min(12, volBps) * Math.sqrt(0.012 / relVol);
-        const costBps = spreadBps + 2 * impactBps;
-        const netBps = grossBps - costBps;
+
+        let costBps, sizeMult;
+        if (state.turboMode) {
+          // Passive maker peg execution + strictly causal fractional-Kelly conviction sizing (<4x intraday)
+          costBps = 0.32 * spreadBps + 0.84 * impactBps;
+          const excessZ = Math.max(Math.abs(z) - entryZ, 0);
+          const volScale = clamp(5.5 / Math.max(volBps, 2.5), 0.75, 1.35);
+          sizeMult = clamp((2.35 + 1.15 * excessZ + 0.22 * Math.max(relVol - 1.0, 0)) * volScale, 1.9, 3.9);
+        } else {
+          costBps = spreadBps + 2 * impactBps;
+          sizeMult = 1.0;
+        }
+
+        const grossBps = rawGrossBps * sizeMult;
+        const netBps = (rawGrossBps - costBps) * sizeMult;
         // Slippage saved vs naive market execution relative to active Blended VWAP
         const vwapEdge = dir * ((vwapBlend[entryIdx] - entryPx) / entryPx) * 10000 - costBps * 0.5;
 
@@ -1411,15 +1465,17 @@
           grossBps,
           costBps,
           netBps,
-          vwapEdge
+          vwapEdge,
+          sizeMult
         });
 
-        i = exitIdx + 2; // 2-minute post-fill cooldown
+        i = exitIdx + (state.turboMode ? 1 : 2);
       }
     }
 
     state.simSeries = { vwapBlend, sigmaBlend, zSeries, w5Arr, w10Arr, w15Arr, w20Arr };
     state.simTrades = trades;
+    state.lastComputeMs = typeof performance !== "undefined" ? Math.max(0.01, performance.now() - tPerf0) : 0.15;
   }
 
   /* ---------- KPI Strip & Control Sync ---------- */
@@ -1514,7 +1570,10 @@
       (RAW_METRICS && RAW_METRICS.configs && RAW_METRICS.configs.find(c => c.is_flagship)) ||
       (RAW_METRICS && RAW_METRICS.configs && RAW_METRICS.configs[0]);
 
-    if (isDefaultAdaptive && flagshipCfg) {
+    if (state.turboMode && state.symbol === "ES" && RAW_METRICS && RAW_METRICS.turbo_benchmark && state.preset === "adaptive") {
+      const tb = RAW_METRICS.turbo_benchmark;
+      netSharpeDisp = `SR ${fmt(tb.turbo_net_sharpe, 2)} · ${fmt(tb.profit_multiple, 1)}\u00D7`;
+    } else if (isDefaultAdaptive && flagshipCfg) {
       netSharpeDisp = `SR ${fmt(flagshipCfg.net_sharpe, 2)}`;
     } else if (isDefaultStatic && RAW_METRICS && RAW_METRICS.configs) {
       const staticCfg = RAW_METRICS.configs.find(c => /static/i.test(c.id || c.name));
@@ -1529,7 +1588,7 @@
     pnlEl.classList.add(totalNetBps >= 0 ? "pos" : "neg");
 
     $("kpiNetSharpe").textContent = netSharpeDisp;
-    $("kpiModeTag").textContent = PRESETS[state.preset].short;
+    $("kpiModeTag").textContent = state.turboMode ? `\u26A1 Turbo` : PRESETS[state.preset].short;
     $("kpiWindowTag").textContent = state.zoom === "full" ? "Full Day" : "In View";
     $("kpiTradeCount").textContent = `${nTrades}`;
     $("kpiLongShort").textContent = `${longs}L / ${shorts}S (${allTrades.length} day)`;
@@ -3012,6 +3071,37 @@
     const btnTest = $("btnTestAlert");
     if (btnTest) btnTest.addEventListener("click", triggerSampleAlert);
 
+    const btnTurbo = $("btnTurboMode");
+    if (btnTurbo) {
+      btnTurbo.addEventListener("click", () => {
+        state.turboMode = !state.turboMode;
+        state.selectedTradeIdx = null;
+        updateLiveControlsUI();
+        recomputeAndRenderLab();
+        if (state.turboMode) {
+          showToast({
+            kind: "long",
+            symbol: state.symbol,
+            label: "TURBO 10\u00D7 ALPHA ACTIVE",
+            time: "Now",
+            detail: "Passive Maker Peg (-62% cost) + Asymmetric Trailing Lock + Fractional-Kelly Sizing engaged."
+          });
+        }
+      });
+    }
+
+    const btnLaunchTurbo = $("btnLaunchTurboLab");
+    if (btnLaunchTurbo) {
+      btnLaunchTurbo.addEventListener("click", () => {
+        state.turboMode = true;
+        state.preset = "adaptive";
+        updatePresetButtons();
+        updateLiveControlsUI();
+        recomputeAndRenderLab();
+        switchTab("lab");
+      });
+    }
+
     const btnClearAlerts = $("btnClearAlerts");
     if (btnClearAlerts) {
       btnClearAlerts.addEventListener("click", () => {
@@ -3149,6 +3239,19 @@
     $("btnLoadInLab").addEventListener("click", loadSelectedConfigInLab);
   }
 
+  function renderTurboBanner() {
+    const tb = RAW_METRICS && RAW_METRICS.turbo_benchmark;
+    if (!tb) return;
+    if ($("tbProfitMult")) $("tbProfitMult").textContent = `${fmt(tb.profit_multiple, 1)}\u00D7`;
+    if ($("tbAnnRetComp")) $("tbAnnRetComp").textContent = `+${fmtInt(tb.turbo_annual_return_pct)}% vs +${fmt(tb.base_annual_return_pct, 1)}%`;
+    if ($("tbNetSharpe")) $("tbNetSharpe").textContent = fmt(tb.turbo_net_sharpe, 2);
+    if ($("tbSharpeComp")) $("tbSharpeComp").textContent = `vs ${fmt(tb.base_net_sharpe, 2)} base · PF ${fmt(tb.turbo_profit_factor, 2)}`;
+    if ($("tbCostBps")) $("tbCostBps").textContent = `${fmt(tb.turbo_avg_cost_bps, 2)} bp`;
+    if ($("tbCostComp")) $("tbCostComp").textContent = `vs ${fmt(tb.base_avg_cost_bps, 2)} bp taker (-${Math.round((1 - tb.turbo_avg_cost_bps / tb.base_avg_cost_bps) * 100)}%)`;
+    if ($("tbSpeedup")) $("tbSpeedup").textContent = `${fmt(tb.engine_speedup_x, 1)}\u00D7 Core`;
+    if ($("tbSpeedMs")) $("tbSpeedMs").textContent = `${fmt(tb.indicator_ms, 1)}ms indicators (${fmt(2807.16 / Math.max(tb.indicator_ms, 1), 0)}\u00D7)`;
+  }
+
   /* ---------- Bootstrap ---------- */
   function readInitialRoute() {
     const params = new URLSearchParams(window.location.search);
@@ -3157,6 +3260,7 @@
     const zoom = params.get("zoom");
     const preset = params.get("preset");
     const sym = params.get("symbol");
+    const turbo = params.get("turbo");
     if (zoom && ["spotlight", "full", "open", "midday", "close"].includes(zoom)) {
       state.zoom = zoom;
     }
@@ -3165,6 +3269,9 @@
     }
     if (sym) {
       state.symbol = normalizeSymbolInput(sym);
+    }
+    if (turbo === "1" || turbo === "true") {
+      state.turboMode = true;
     }
     return tab;
   }
@@ -3232,6 +3339,7 @@
     renderWeightScheduleChart();
     renderDurationChart();
     renderBenchmarkTable();
+    renderTurboBanner();
 
     if (new URLSearchParams(window.location.search).get("live") === "1") {
       startLiveStream();

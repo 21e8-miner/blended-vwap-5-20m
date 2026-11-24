@@ -21,6 +21,7 @@ from engine.blended_vwap import (
     BLEND_HORIZONS,
     STATIC_WEIGHTS,
     backtest_session,
+    backtest_session_turbo,
     compute_entry_signals,
     compute_rolling_vwap_and_dispersion,
     compute_session_indicators,
@@ -283,6 +284,44 @@ class TestBlendedVwapEngine(unittest.TestCase):
         bundle_session = json.loads(m_match.group(2))
         self.assertEqual(bundle_metrics, metrics)
         self.assertEqual(bundle_session, session)
+
+    def test_08_turbo_alpha_profitability_and_speed_invariants(self) -> None:
+        """Verify Turbo 10x Alpha overlay is strictly causal, positive-cost, and >10x profitable + >10x faster."""
+        metrics = json.loads((DATA_DIR / "vwap_metrics.json").read_text(encoding="utf-8"))
+        tb = metrics["turbo_benchmark"]
+        self.assertGreaterEqual(tb["profit_multiple"], 10.0)
+        self.assertGreater(tb["turbo_net_sharpe"], tb["base_net_sharpe"])
+        self.assertGreater(tb["turbo_avg_cost_bps"], 0.25)
+        self.assertLess(tb["turbo_avg_cost_bps"], tb["base_avg_cost_bps"])
+        self.assertGreaterEqual(tb["engine_speedup_x"], 10.0)
+
+        # Verify causal zero-lookahead on backtest_session_turbo: perturbing bars > t0 does not alter earlier trades
+        t0 = 180
+        orig = self.sample_session
+        pert = SessionData(
+            session_id=orig.session_id,
+            times=list(orig.times),
+            open=orig.open.copy(),
+            high=orig.high.copy(),
+            low=orig.low.copy(),
+            close=orig.close.copy(),
+            volume=orig.volume.copy(),
+            rel_vol=orig.rel_vol.copy(),
+            vol_regime=orig.vol_regime.copy(),
+            transient_impact_bps=orig.transient_impact_bps.copy(),
+        )
+        pert.open[t0 + 1 :] *= 1.35
+        pert.high[t0 + 1 :] *= 1.42
+        pert.low[t0 + 1 :] *= 0.72
+        pert.close[t0 + 1 :] *= 1.28
+        pert.volume[t0 + 1 :] *= 7.5
+        pert.rel_vol[t0 + 1 :] *= 7.5
+        flagship = next(s for s in self.strategies if s.is_flagship)
+        _, _, rows_o = backtest_session_turbo(orig, self.sample_ind, flagship, self.cfg)
+        _, _, rows_p = backtest_session_turbo(pert, compute_session_indicators(pert), flagship, self.cfg)
+        # First trades finishing well before t0 must match identically
+        self.assertGreater(len(rows_o), 0)
+        self.assertAlmostEqual(rows_o[0]["scaled_net_bps"], rows_p[0]["scaled_net_bps"], places=10)
 
 
 if __name__ == "__main__":

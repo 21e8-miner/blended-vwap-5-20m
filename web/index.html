@@ -187,11 +187,20 @@
               </div>
               <div class="rt-controls-row">
                 <div class="rt-speed-group" id="rtSpeedGroup" role="group" aria-label="Stream cadence">
+                  <button type="button" class="rt-speed-btn" data-ms="100" title="10x Ultra-Fast 100ms stream">100ms</button>
+                  <button type="button" class="rt-speed-btn" data-ms="250" title="4x Fast 250ms stream">250ms</button>
                   <button type="button" class="rt-speed-btn" data-ms="500">0.5s</button>
                   <button type="button" class="rt-speed-btn active" data-ms="1000">1s</button>
                   <button type="button" class="rt-speed-btn" data-ms="2000">2s</button>
                 </div>
-                <button type="button" class="btn-test-alert" id="btnTestAlert" title="Trigger a sample toast, sound chime, and desktop alert">Test Alert</button>
+                <button type="button" class="btn-test-alert" id="btnTestAlert" title="Trigger a sample toast, sound chime, and desktop alert">Test</button>
+              </div>
+              <div class="turbo-toggle-row">
+                <button type="button" class="btn-turbo-mode" id="btnTurboMode" aria-pressed="false" title="Enable Passive Maker Peg + Trailing Reversion Lock + Fractional-Kelly Conviction Sizing">
+                  <span class="turbo-bolt">&#9889;</span>
+                  <span id="btnTurboLabel">Turbo 10&times; Alpha: OFF</span>
+                  <small id="btnTurboSub">1&times; Taker</small>
+                </button>
               </div>
               <div class="toggle-grid">
                 <label class="toggle-chip"><input type="checkbox" id="chkTrigBreach" checked> Band Breach</label>
@@ -364,6 +373,7 @@
               <span class="tel-item"><small>DEV</small><strong id="telSpreadBps">—</strong></span>
               <span class="tel-item"><small>LIVE Z</small><strong class="tel-z" id="telLiveZ">—</strong></span>
               <span class="tel-item"><small>REL VOL</small><strong id="telRelVol">—</strong></span>
+              <span class="tel-item"><small>ENGINE</small><strong class="tel-speed" id="telEngineMs">—</strong></span>
               <span class="tel-signal" id="telSignalState">WATCHING</span>
             </div>
 
@@ -448,6 +458,37 @@
          TAB 2: HORIZON ATTRIBUTION & FRONTIER
          ===================================================================== -->
     <section class="tab-panel" id="panel-attribution" role="tabpanel" aria-labelledby="tabBtnAttribution">
+      <!-- Turbo 10x Alpha & Engine Speedup Benchmark Strip -->
+      <div class="turbo-banner num" id="turboBanner">
+        <div class="tb-title-block">
+          <span class="tb-kicker">&#9889; CAUSAL TURBO ALPHA &amp; VECTORIZED ENGINE</span>
+          <span class="tb-sub">Passive Maker Execution + Trailing Reversion Lock + Fractional-Kelly Sizing (&lt;4&times; intraday) &middot; O(N) Prefix-Sum Engine</span>
+        </div>
+        <div class="tb-metrics">
+          <div class="tb-stat">
+            <small>PROFIT MULTIPLE</small>
+            <strong class="pos" id="tbProfitMult">—</strong>
+            <span id="tbAnnRetComp">—</span>
+          </div>
+          <div class="tb-stat">
+            <small>TURBO NET SHARPE</small>
+            <strong id="tbNetSharpe">—</strong>
+            <span id="tbSharpeComp">—</span>
+          </div>
+          <div class="tb-stat">
+            <small>MAKER COST DRAG</small>
+            <strong id="tbCostBps">—</strong>
+            <span id="tbCostComp">—</span>
+          </div>
+          <div class="tb-stat">
+            <small>ENGINE SPEEDUP</small>
+            <strong class="cobalt" id="tbSpeedup">—</strong>
+            <span id="tbSpeedMs">—</span>
+          </div>
+        </div>
+        <button type="button" class="btn-inspect-lab" id="btnLaunchTurboLab">Run Turbo 10&times; in Lab &rarr;</button>
+      </div>
+
       <div class="attr-top-grid">
         <!-- Left: Interactive Fig. 1 Regime Frontier Map -->
         <div class="card card-accent-top">
