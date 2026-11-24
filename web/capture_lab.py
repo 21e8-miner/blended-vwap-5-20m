@@ -81,15 +81,15 @@ def main() -> int:
     args = parser.parse_args()
 
     targets = [
-        ("lab", OUTPUT_DIR / "workbench_tab1_lab.png", "workbench_tab1_lab.png"),
-        ("attribution", OUTPUT_DIR / "workbench_tab2_attribution.png", "workbench_tab2_attribution.png"),
-        ("research", OUTPUT_DIR / "workbench_tab3_research.png", "workbench_tab3_research.png"),
+        ("lab", OUTPUT_DIR / "workbench_tab1_lab.png", "workbench_tab1_lab.png", args.height),
+        ("attribution", OUTPUT_DIR / "workbench_tab2_attribution.png", "workbench_tab2_attribution.png", args.height),
+        ("research", OUTPUT_DIR / "workbench_tab3_research.png", "workbench_tab3_research.png", max(args.height, 1215)),
     ]
     if args.include_sheet:
-        targets.append(("sheet", OUTPUT_DIR / "workbench_tab4_sheet.png", "workbench_tab4_sheet.png"))
+        targets.append(("sheet", OUTPUT_DIR / "workbench_tab4_sheet.png", "workbench_tab4_sheet.png", args.height))
 
-    for tab, out_path, artifact_name in targets:
-        capture_tab(tab, out_path, width=args.width, height=args.height, scale=args.scale)
+    for tab, out_path, artifact_name, tab_h in targets:
+        capture_tab(tab, out_path, width=args.width, height=tab_h, scale=args.scale)
         print(f"Captured [{tab}] -> {out_path} ({out_path.stat().st_size:,} bytes)")
         if args.artifact_dir is not None:
             args.artifact_dir.mkdir(parents=True, exist_ok=True)

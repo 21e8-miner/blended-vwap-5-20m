@@ -1,4 +1,4 @@
-"""Render Page-1 (blue_sheet.html) and Page-2 (research_brief.html) to high-DPI PNG & 1-page US Letter PDF via headless Edge."""
+"""Render Page-1 (blue_sheet.html), Page-2 (research_brief.html), and Page-3 (dual_regime_brief.html) to 2x PNG & 1-page US Letter PDF via headless Edge."""
 
 from __future__ import annotations
 
@@ -32,6 +32,12 @@ SHEETS = {
         "html": WEB_DIR / "research_brief.html",
         "png": OUTPUT_DIR / "ou_spectral_research_brief.png",
         "pdf": OUTPUT_DIR / "ou_spectral_research_brief.pdf",
+    },
+    "page3": {
+        "label": "Page 3 — Dual-Regime Bayesian Monograph",
+        "html": WEB_DIR / "dual_regime_brief.html",
+        "png": OUTPUT_DIR / "dual_regime_brief.png",
+        "pdf": OUTPUT_DIR / "dual_regime_brief.pdf",
     },
 }
 
@@ -151,33 +157,34 @@ def render_sheet(
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Render IEEE Quant Blue sheets (Page 1 & Page 2).")
+    parser = argparse.ArgumentParser(description="Render IEEE Quant Blue monograph pages (Page 1, Page 2, Page 3).")
     parser.add_argument(
         "--only",
-        choices=["page1", "page2", "both"],
-        default="both",
-        help="Which sheet(s) to render (default: both).",
+        choices=["page1", "page2", "page3", "all"],
+        default="all",
+        help="Which sheet(s) to render (default: all).",
     )
     parser.add_argument("--preview-p1", type=Path, default=None, help="Optional preview PNG path for Page 1.")
     parser.add_argument("--preview-p2", type=Path, default=None, help="Optional preview PNG path for Page 2.")
+    parser.add_argument("--preview-p3", type=Path, default=None, help="Optional preview PNG path for Page 3.")
     args = parser.parse_args()
 
     edge_bin = find_edge()
-    targets = ["page1", "page2"] if args.only == "both" else [args.only]
+    targets = ["page1", "page2", "page3"] if args.only == "all" else [args.only]
+    previews = {"page1": args.preview_p1, "page2": args.preview_p2, "page3": args.preview_p3}
 
     for key in targets:
         spec = SHEETS[key]
-        if key == "page2" and not spec["html"].exists() and args.only == "both":
+        if args.only == "all" and not spec["html"].exists():
             print(f"Skipping {spec['label']} (not found yet: {spec['html']})")
             continue
-        preview = args.preview_p1 if key == "page1" else args.preview_p2
         render_sheet(
             edge_bin=edge_bin,
             html_path=spec["html"],
             png_path=spec["png"],
             pdf_path=spec["pdf"],
             label=spec["label"],
-            copy_preview_to=preview,
+            copy_preview_to=previews[key],
         )
 
 

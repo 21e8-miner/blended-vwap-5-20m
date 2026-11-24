@@ -8,14 +8,16 @@ A causal multi-horizon intraday VWAP execution & alpha framework spanning the **
 - **Deep Quant Research & Live 8-Asset Signal Radar:** [https://21e8-miner.github.io/blended-vwap-5-20m/web/index.html?tab=research](https://21e8-miner.github.io/blended-vwap-5-20m/web/index.html?tab=research)
 - **Editorial Blue Sheet — Page 1 (Map of Blended 5–20m VWAP):** [https://21e8-miner.github.io/blended-vwap-5-20m/web/blue_sheet.html](https://21e8-miner.github.io/blended-vwap-5-20m/web/blue_sheet.html) · [PDF](./output/blended_vwap_blue_sheet.pdf)
 - **Companion Research Brief — Page 2 (OU-Spectral, Curvature & Toxicity Gating):** [https://21e8-miner.github.io/blended-vwap-5-20m/web/research_brief.html](https://21e8-miner.github.io/blended-vwap-5-20m/web/research_brief.html) · [PDF](./output/ou_spectral_research_brief.pdf)
+- **Companion Research Monograph — Page 3 (Dual-Regime Bayesian Bifurcation & All-Weather Proof):** [https://21e8-miner.github.io/blended-vwap-5-20m/web/dual_regime_brief.html](https://21e8-miner.github.io/blended-vwap-5-20m/web/dual_regime_brief.html) · [PDF](./output/dual_regime_brief.pdf)
 
 ---
 
 ## Preview
 
-### Page 1 — Editorial Blue Sheet & Page 2 — OU-Spectral Research Brief
+### 3-Page Quant Blue Monograph (Page 1 · Page 2 · Page 3)
 ![The Map of Blended 5–20m VWAP](./output/blended_vwap_blue_sheet.png)
 ![Spectral VWAP: OU Half-Life, Curvature & Toxicity Gating](./output/ou_spectral_research_brief.png)
+![Dual-Regime Spectral VWAP: Bayesian Bifurcation](./output/dual_regime_brief.png)
 
 ### Deep Research Lab & Live 8-Asset Signal Radar
 ![Deep Quant Research & Live 8-Asset Radar](./output/workbench_tab3_research.png)

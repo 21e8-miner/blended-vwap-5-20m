@@ -109,3 +109,53 @@ All three tracks (`@quant-engine`, `@blue-sheet`, `@interactive-lab`) pass indep
 ## Phase 2 Final Sign-Off
 
 All Phase 2 Deep Research deliverables (`engine/research_lab.py`, `data/research_lab.json`, `data/bundle.js`, `web/research_brief.html`, `output/ou_spectral_research_brief.png/.pdf`, and upgraded `web/index.html` / `web/app.js`) pass independent quantitative, causality, statistical, DOM, PDF, and visual QA with **zero open defects**. Approved for final presentation.
+
+---
+
+# Phase 3 Breakthrough Mission — Independent QA Verification Sign-Off
+
+**Status:** **PASS — ALL PHASE 3 CHECKS VERIFIED (0 OPEN DEFECTS)**  
+**Scope:** 2-State Hamilton Online Bayesian Dual-Regime Engine (`engine/dual_regime.py`), 5-Regime All-Weather Stress Suite, 1,000-Trial Stationary Block-Bootstrap CIs, 8-Asset Intraday Portfolio, Page-3 IEEE Quant Blue Monograph (`web/dual_regime_brief.html`), and Phase 3 Interactive Workbench (`Dual-Regime Bayes`, `P(TREND)`, `Paper Execution Desk`, 5-Regime Stress / Bootstrap / Portfolio visualizations, 3-Page Broadsheet Switcher).
+
+---
+
+## 7. Dual-Regime Bayesian Engine, Bootstrap & Portfolio (`@quant-engine`)
+
+| Check | Method & Evidence | Result |
+|---|---|---|
+| Full Unit Test Suite | `python -m unittest discover -s tests -v` | **PASS** — **10/10 tests OK** (`0.666s`), incl. `test_10` (Hamilton Bayes filter, Dual-Regime backtest, bootstrap, 8-asset portfolio) |
+| Multi-Cutoff Zero-Lookahead Causality (Fade + Surf!) | Independent future-bar perturbation across 4 cutoffs ($t_0 \in \{40, 120, 180, 260\}$) on **Baseline (`seed=42`)**, **Toxic Melt-Up (`seed=202`, Session #9)**, and **Whipsaw Flip (`seed=5505`)** testing `p_trend`, `fan_score`, `fan_persist`, `llr`, `regime_modes`, and `backtest_session_dual_regime` across both `1x`/`Turbo` and `latency_bars=0/1` (**88 live SURF fills audited**) | **PASS** — Exact match (`atol = 1e-13` on filter arrays, $\le 10^{-12}$ on all early trade entries, exits, modes, sides, and `scaled_net_bps`) |
+| 5-Regime All-Weather Stress Matrix | Audited all 5 unseen-seed regimes (`1101, 202, 3303, 4004, 5505`), exact 5-regime means, and Toxic Melt-Up turnaround | **PASS** — **5/5 strictly positive** for both `Dual-Regime 1x` (`+3.48` mean, Melt-Up `+10.04` / `0.98%` MDD vs `-8.56` OU-Fade, Whipsaw `+2.36` vs `-18.84` Adaptive) and `Dual-Regime Turbo` (`+7.42` mean, Melt-Up `+12.81`, Whipsaw `+4.87`) |
+| Melt-Up Bifurcation Trajectory | Audited 130-bar `seed=202` Session #9 (`11:55–14:04 ET`) trajectory | **PASS** — Starts in Fade (`p_trend < 0.38`), crosses `0.62` at bar `18` (`12:13 ET`), finishes `Dual 1x 100.307 > OU-Fade 99.340 > 8m 98.889 > Adaptive 98.569` |
+| 1,000-Trial Stationary Block-Bootstrap | Verified Politis–Romano block bootstrap (`block_len = 5`, `seed = 777`) CI ordering (`ci95_lo <= median <= ci95_hi`), `Prob(Loss)`, and Daily `CVaR 95%` on `all_weather_120d` & `baseline_60d` | **PASS** — Only Dual-Regime models clear zero across entire 95% CI: `Dual 1x` `+3.85 [+1.21, +6.51]` (`0.1%` loss, `-215.49 bps`), `Dual Turbo` `+7.67 [+4.66, +10.69]` (`0.0%` loss, `-486.67 bps`) |
+| 8-Asset Intraday Portfolio | Audited 8-asset correlated simulation (`ES, SPY, QQQ, NVDA, AAPL, TSLA, MSFT, BTC-USD`, 60d, `seed = 808`) | **PASS** — Risk-parity weights sum to `100.0%`; `Single Avg SR 2.80` $\to$ `Equal-Weight 7.14` $\to$ `Risk-Parity 7.25` (`+159.2%` uplift, `DR = 2.59×`, avg corr `0.027`, MDD `6.16% -> 1.26%`, CVaR95 `-61.03 bps`, `Turbo RP 14.83`) |
+| Phase 1 & 2 Preservation + `bundle.js` Parity | `node --check data/bundle.js` + Node VM deep-equality check + 390-bar `session_bars.json` `p_trend`/`regime_mode` consistency | **PASS** — `{ metricsExact: true, sessionExact: true, researchLabExact: true, dualRegimeExact: true }`; all Phase 1 & 2 outputs preserved intact |
+
+---
+
+## 8. Page-3 IEEE Dual-Regime Monograph (`@blue-sheet`)
+
+| Check | Method & Evidence | Result |
+|---|---|---|
+| 3-Page PDF & Resolution Suite | Binary PDF & PIL inspection across Page 1, Page 2, and Page 3 (`output/dual_regime_brief.pdf/.png`) | **PASS** — All 3 pages `2200×2848` PNG & **exact 1-page US Letter (`612×792`)** PDF (`Page 1`: `233,386 B`, `Page 2`: `301,773 B`, `Page 3`: `279,644 B`); Pages 1 & 2 unchanged |
+| Visual Fidelity, `Fig. 3`, Eq. `(5)`–`(6)` | `read_file` inspection of full sheet + native-resolution crops of `Fig. 3`, Left Column (Eq. 5–6 & Sec VII–VIII), and Right Column (`TABLE IV`, `TABLE V`, Sec IX) | **PASS** — Crisp Quant Blue monograph layout, zero overlapping labels/curves/whiskers in dual-panel `Fig. 3`, publication-grade Eq. `(5)` and `(6)` |
+| DOM & Numeric Parity | `node --check` on inline JS (`rc=0`) + headless Edge `--dump-dom` (0 `NaN`/`undefined`/placeholders) verifying all 25 `TABLE IV` stress cells + 5-regime means, all `TABLE V` bootstrap & 8-asset rows, `Fig. 3`, and prose against `data/dual_regime.json` | **PASS** — 100% exact numeric parity |
+
+**Defect Caught & Verified Resolved (Round 1 -> Round 2):**
+1. **Equation `(5)` fraction bar width (`web/dual_regime_brief.html` `.m-frac .m-num`)**: Initial `border-bottom` only spanned the narrower numerator (`p_t^prior e^{ℓ_t}`) rather than the wider denominator (`p_t^prior e^{ℓ_t} + (1 - p_t^prior)`). Fixed via `width: 100%; justify-content: center;` on `.m-frac .m-num` / `.m-den` — re-verified razor-sharp edge-to-edge in native-resolution crop.
+
+---
+
+## 9. Phase 3 Interactive Workbench (`@interactive-lab`)
+
+| Check | Method & Evidence | Result |
+|---|---|---|
+| JS Syntax & Multi-Route DOM Audit | `node --check web/app.js` (`rc=0`) + headless Edge `--dump-dom` across `?tab=lab`, `?tab=lab&preset=dual_regime`, `?tab=attribution`, `?tab=research`, `?tab=sheet&page=2`, and `?tab=sheet&page=3` | **PASS** — 0 `NaN`/`undefined`, `dataBanner` hidden; `lab_dual` yields `Dual-Regime, +90.4 bp, SR 5.89 (OOS 7.49)`; `sheet&page=3` switches iframe cleanly to `dual_regime_brief.html` |
+| Tab 1 Live Desk & Preserved Features | Verified `Dual-Regime [Bayes]` preset, `P(TREND)` telemetry pill (`0.01 FADE`), and **Paper Execution Desk** (`$100,000.00`, `Buy`, `Sell`, `Flatten`, `Auto-Pilot: OFF`, `Export CSV`) alongside all preserved Phase 1 & 2 features (`symbolInput`, `csvFileInput`, `turbo`, `VPIN`, `ou_spectral`) | **PASS** — All controls rendered cleanly with zero overflow (`2880×1920 @2x`) |
+| Tab 3 Deep Research Full Parity | Verified 8-asset Live Radar (`P(TREND)` column, `2.80 ms`), all 8 `Table II` Walk-Forward/DSR($M=20$) models, all 5×5 `Table III` Stress cards (`+10.04`/`+12.81` Melt-Up, `+2.36`/`+4.87` Whipsaw), 1,000-trial Block-Bootstrap 95% CI whisker plot, and 8-Asset Portfolio Diversification card (`2.80 -> 7.14 -> 7.25`, `Div Ratio 2.59×`) against `data/dual_regime.json` | **PASS** — 100% exact parity, crisp visual hierarchy (`2880×2430 @2x`), zero label overlaps |
+
+---
+
+## Phase 3 Final Sign-Off
+
+All Phase 3 Dual-Regime Bayesian Bifurcation deliverables across `@quant-engine`, `@blue-sheet`, and `@interactive-lab` pass independent quantitative, multi-cutoff causality, statistical, DOM, 3-page PDF, and visual QA with **zero open defects**. Approved for final presentation.

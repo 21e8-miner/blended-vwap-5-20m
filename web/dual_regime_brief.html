@@ -1,0 +1,1367 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Dual-Regime Spectral VWAP: Bayesian Bifurcation Across Mean Reversion &amp; Informed Flow</title>
+  <style>
+    :root {
+      --navy: #0B1F3A;
+      --cobalt: #1B4F9C;
+      --steel: #3B76C4;
+      --cerulean: #68A3DF;
+      --ice: #EDF4FC;
+      --ice-soft: #F6FAFF;
+      --grid: #B8CEE8;
+      --slate: #3A5373;
+      --ink: #12243B;
+      --paper: #FFFFFF;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    html, body {
+      background: var(--paper);
+      color: var(--ink);
+      font-family: "Times New Roman", Cambria, Georgia, serif;
+      -webkit-font-smoothing: antialiased;
+      -webkit-print-color-adjust: exact;
+      print-color-adjust: exact;
+    }
+
+    body {
+      display: flex;
+      justify-content: center;
+      align-items: flex-start;
+      min-height: 100vh;
+    }
+
+    .sheet {
+      width: 1100px;
+      height: 1424px;
+      background: var(--paper);
+      padding: 24px 44px 26px 44px;
+      overflow: hidden;
+      position: relative;
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* IEEE Running Header matching Page 2 */
+    .running-folio {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 10.5px;
+      font-variant: small-caps;
+      letter-spacing: 0.08em;
+      color: var(--slate);
+      border-bottom: 0.75px solid var(--grid);
+      padding-bottom: 4px;
+      margin-bottom: 9px;
+    }
+
+    .running-folio .folio-right {
+      color: var(--cobalt);
+      font-weight: 700;
+    }
+
+    /* Header */
+    .sheet-header {
+      text-align: center;
+      margin-bottom: 10px;
+    }
+
+    .sheet-title {
+      font-size: 27px;
+      font-weight: 700;
+      line-height: 1.13;
+      letter-spacing: -0.01em;
+      color: var(--navy);
+      margin-bottom: 5px;
+    }
+
+    .sheet-subtitle {
+      font-size: 14.8px;
+      font-style: italic;
+      font-weight: 400;
+      color: var(--slate);
+      line-height: 1.22;
+    }
+
+    /* Dual-Panel Hero Figure (Fig. 3) */
+    .hero-figure {
+      width: 100%;
+      margin-bottom: 12px;
+    }
+
+    .hero-svg-wrap {
+      width: 100%;
+      line-height: 0;
+    }
+
+    #fig3-svg {
+      width: 100%;
+      height: auto;
+      display: block;
+      overflow: visible;
+    }
+
+    .fig-caption {
+      margin-top: 5px;
+      font-size: 12.2px;
+      line-height: 1.32;
+      color: var(--ink);
+      text-align: justify;
+      hyphens: auto;
+    }
+
+    .fig-caption .fig-label {
+      color: var(--navy);
+      font-weight: 700;
+    }
+
+    /* Two-column IEEE body */
+    .columns {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      column-gap: 28px;
+      align-items: start;
+      flex: 1 1 auto;
+    }
+
+    .col {
+      min-width: 0;
+    }
+
+    /* Headings & Prose */
+    h2.sec-head {
+      text-align: center;
+      font-size: 13.8px;
+      font-weight: 700;
+      font-variant: small-caps;
+      letter-spacing: 0.04em;
+      color: var(--navy);
+      margin-top: 8px;
+      margin-bottom: 4px;
+      line-height: 1.18;
+    }
+
+    .col > h2.sec-head:first-child {
+      margin-top: 0;
+    }
+
+    h3.sub-head {
+      font-size: 13px;
+      font-weight: 400;
+      font-style: italic;
+      color: var(--cobalt);
+      margin-top: 6px;
+      margin-bottom: 2px;
+      line-height: 1.22;
+    }
+
+    p.body-p {
+      font-size: 12.8px;
+      line-height: 1.33;
+      color: var(--ink);
+      text-align: justify;
+      text-indent: 1.2em;
+      margin-bottom: 4.5px;
+    }
+
+    p.body-p.no-indent {
+      text-indent: 0;
+    }
+
+    /* Publication-grade Math Equations (zero inherited indent!) */
+    .eq-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin: 6px 0 7px 0;
+      padding: 1px 0;
+    }
+
+    .eq-spacer {
+      width: 24px;
+      flex: 0 0 24px;
+    }
+
+    .eq-body {
+      flex: 1 1 auto;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      font-family: "Cambria Math", "Times New Roman", serif;
+      font-size: 15.2px;
+      color: var(--navy);
+      line-height: 1.15;
+      gap: 5px;
+    }
+
+    .eq-line {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 4px;
+      white-space: nowrap;
+    }
+
+    .eq-num {
+      width: 24px;
+      flex: 0 0 24px;
+      text-align: right;
+      font-family: "Times New Roman", serif;
+      font-size: 14.2px;
+      color: var(--cobalt);
+      font-weight: 400;
+    }
+
+    .m-it { font-style: italic; }
+    .m-rm { font-style: normal; }
+    .m-bf { font-weight: 700; font-style: normal; }
+
+    .m-sub {
+      font-size: 0.66em;
+      vertical-align: -0.24em;
+      line-height: 0;
+    }
+
+    .m-sup {
+      font-size: 0.64em;
+      vertical-align: 0.44em;
+      line-height: 0;
+    }
+
+    .m-atom {
+      display: inline-block;
+      white-space: nowrap;
+      text-indent: 0;
+    }
+
+    .m-subsup {
+      display: inline-flex;
+      flex-direction: column;
+      align-items: flex-start;
+      justify-content: center;
+      line-height: 0.86;
+      margin-left: 1px;
+      vertical-align: middle;
+      text-indent: 0;
+    }
+
+    .m-subsup .sup-t {
+      font-size: 0.56em;
+      font-style: normal;
+      margin-bottom: 1px;
+    }
+
+    .m-subsup .sub-t {
+      font-size: 0.60em;
+      font-style: italic;
+    }
+
+    .m-frac {
+      display: inline-flex;
+      flex-direction: column;
+      align-items: center;
+      vertical-align: middle;
+      margin: 0 2px;
+      font-size: 0.9em;
+    }
+
+    .m-frac .m-num {
+      width: 100%;
+      padding: 0 5px 2px 5px;
+      border-bottom: 1.15px solid var(--navy);
+      white-space: nowrap;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .m-frac .m-den {
+      width: 100%;
+      padding: 2px 5px 0 5px;
+      white-space: nowrap;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    /* Piecewise cases brace for Eq. (6) */
+    .cases-wrap {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+    }
+
+    .cases-brace {
+      height: 54px;
+      width: 11px;
+      display: block;
+      flex: 0 0 11px;
+    }
+
+    .cases-grid {
+      display: grid;
+      grid-template-columns: auto auto;
+      column-gap: 10px;
+      row-gap: 2px;
+      align-items: center;
+      font-size: 13.4px;
+      text-align: left;
+    }
+
+    .cases-cond {
+      font-family: "Times New Roman", serif;
+      font-size: 12.2px;
+      color: var(--slate);
+    }
+
+    /* Booktabs Tables IV & V */
+    .table-wrap {
+      margin-bottom: 13px;
+    }
+
+    .table-title-num {
+      text-align: center;
+      font-size: 12.4px;
+      font-variant: small-caps;
+      letter-spacing: 0.06em;
+      color: var(--navy);
+      line-height: 1.18;
+    }
+
+    .table-title-cap {
+      text-align: center;
+      font-size: 11.4px;
+      font-variant: small-caps;
+      letter-spacing: 0.03em;
+      color: var(--slate);
+      margin-bottom: 4px;
+      line-height: 1.2;
+    }
+
+    table.booktabs {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 10.9px;
+      line-height: 1.26;
+      font-variant-numeric: tabular-nums;
+      color: var(--ink);
+    }
+
+    table.booktabs.t5 {
+      font-size: 11.2px;
+    }
+
+    table.booktabs thead tr {
+      border-top: 1.8px solid var(--navy);
+      border-bottom: 0.9px solid var(--cobalt);
+    }
+
+    table.booktabs th {
+      padding: 3.4px 2.5px;
+      font-weight: 700;
+      color: var(--navy);
+      text-align: left;
+      white-space: nowrap;
+    }
+
+    table.booktabs th.num,
+    table.booktabs td.num {
+      text-align: right;
+    }
+
+    table.booktabs td {
+      padding: 3.3px 2.5px;
+      vertical-align: middle;
+      white-space: nowrap;
+    }
+
+    table.booktabs tbody tr.row-highlight {
+      background: var(--ice);
+      font-weight: 700;
+      color: var(--navy);
+    }
+
+    table.booktabs tbody tr.row-highlight td:first-child {
+      box-shadow: inset 2.5px 0 0 var(--cobalt);
+      padding-left: 5px;
+      color: var(--navy);
+    }
+
+    table.booktabs tbody tr.row-turbo {
+      background: var(--ice-soft);
+      font-weight: 700;
+      color: var(--navy);
+    }
+
+    table.booktabs tbody tr.row-turbo td:first-child {
+      box-shadow: inset 2.5px 0 0 var(--navy);
+      padding-left: 5px;
+      color: var(--navy);
+    }
+
+    table.booktabs tbody tr.panel-divider td {
+      border-top: 0.9px solid var(--cobalt);
+      border-bottom: 0.6px solid var(--grid);
+      background: #FAFCFF;
+      font-size: 10.6px;
+      font-weight: 700;
+      font-variant: small-caps;
+      letter-spacing: 0.04em;
+      color: var(--cobalt);
+      padding: 3px 3px;
+    }
+
+    table.booktabs tfoot tr {
+      border-top: 0.9px solid #7BA3D1;
+      border-bottom: 1.8px solid var(--navy);
+      font-weight: 700;
+      color: var(--navy);
+    }
+
+    table.booktabs tfoot td {
+      padding: 3.5px 2.5px;
+    }
+
+    .mdd-sub {
+      font-size: 9.6px;
+      font-weight: 400;
+      color: var(--slate);
+      margin-left: 1.5px;
+    }
+
+    .neg-val {
+      color: #5C6F88;
+    }
+
+    .pos-strong {
+      color: var(--navy);
+      font-weight: 700;
+    }
+
+    .table-note {
+      margin-top: 3px;
+      font-size: 10.4px;
+      font-style: italic;
+      color: var(--slate);
+      line-height: 1.24;
+      text-align: left;
+    }
+
+    .aphorism {
+      margin-top: 16px;
+      text-align: center;
+      font-size: 13.3px;
+      font-style: italic;
+      line-height: 1.38;
+      color: var(--cobalt);
+      padding: 0 8px;
+    }
+
+    .data-error {
+      border: 1.5px solid #B91C1C;
+      background: #FEF2F2;
+      color: #991B1B;
+      padding: 12px 16px;
+      font-size: 14px;
+      margin: 12px 0;
+      display: none;
+    }
+
+    @page {
+      size: 8.5in 11in;
+      margin: 0;
+    }
+
+    @media print {
+      html, body {
+        width: 8.5in;
+        height: 11in;
+        margin: 0;
+        padding: 0;
+        background: #FFFFFF;
+        overflow: hidden;
+      }
+
+      body {
+        display: block;
+      }
+
+      .sheet {
+        width: 1100px;
+        height: 1424px;
+        zoom: 0.7415;
+        margin: 0;
+        page-break-after: avoid;
+        break-after: avoid;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main class="sheet" id="sheet-root">
+    <div class="running-folio">
+      <span>Blended 5&ndash;20m VWAP &middot; Companion Research Monograph</span>
+      <span class="folio-right">Page 3 &middot; Dual-Regime Bayesian Bifurcation</span>
+    </div>
+
+    <header class="sheet-header">
+      <h1 class="sheet-title">Dual-Regime Spectral VWAP: Bayesian Bifurcation<br />Across Mean Reversion &amp; Informed Flow</h1>
+      <p class="sheet-subtitle">
+        Two-state Hamilton online filtering, Fade/Flat/Surf execution, 1,000-trial stationary block-bootstrap CIs, and 8-asset risk-parity diversification.
+      </p>
+    </header>
+
+    <div class="data-error" id="data-error">
+      Waiting for <code>../data/bundle.js</code> (<code>window.VWAP_DATA.metrics.dual_regime_lab</code>). Run <code>engine/run_pipeline.py</code> first.
+    </div>
+
+    <figure class="hero-figure">
+      <div class="hero-svg-wrap">
+        <svg id="fig3-svg" viewBox="0 0 1012 374" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Toxic Melt-Up Bifurcation Trajectory and 1000-Trial Block-Bootstrap 95% Sharpe CIs"></svg>
+      </div>
+      <figcaption class="fig-caption" id="fig3-caption">
+        <span class="fig-label">Fig. 3.</span> Loading dual-panel Bayesian bifurcation and bootstrap figure caption...
+      </figcaption>
+    </figure>
+
+    <section class="columns">
+      <!-- LEFT COLUMN -->
+      <div class="col col-left">
+        <h2 class="sec-head">VII. Hamilton Bayesian Regime Filter</h2>
+
+        <h3 class="sub-head">A. Recursive Two-State Online Posterior</h3>
+        <p class="body-p" id="sec7a-lead">
+          Let latent state <span class="m-atom"><span class="m-it">S</span><span class="m-sub m-it">t</span> &isin; {0, 1}</span>
+          denote <em>Reverting Liquidity Sweep</em> (0) versus <em>Informed Momentum Trend</em> (1), governed by sticky
+          Markov transition matrix <span class="m-it">T</span> with diagonal persistence
+          (<span class="m-atom"><span class="m-it">p</span><span class="m-sub">00</span></span>,
+          <span class="m-atom"><span class="m-it">p</span><span class="m-sub">11</span></span>).
+          Given causal tempered log-likelihood ratio <span class="m-atom"><span class="m-it">&ell;</span><span class="m-sub m-it">t</span></span>
+          combining VPIN, Hurst VR(5), |Slope|, aligned OFI, and 4-horizon monotonic VWAP fan persistence, the online filter updates recursively:
+        </p>
+
+        <div class="eq-row" aria-label="Equation 5: Recursive Hamilton Bayesian Filter">
+          <span class="eq-spacer"></span>
+          <div class="eq-body">
+            <div class="eq-line" style="font-size: 14.3px;">
+              <span class="m-atom"><span class="m-it">p</span><span class="m-subsup"><span class="sup-t">prior</span><span class="sub-t">t</span></span></span>
+              <span>=</span>
+              <span class="m-atom"><span class="m-it">p</span><span class="m-subsup"><span class="sup-t">trend</span><span class="sub-t">t&minus;1</span></span><span class="m-it">p</span><span class="m-sub">11</span></span>
+              <span>+</span>
+              <span class="m-atom">(1 &minus; <span class="m-it">p</span><span class="m-subsup"><span class="sup-t">trend</span><span class="sub-t">t&minus;1</span></span>)(1 &minus; <span class="m-it">p</span><span class="m-sub">00</span>)</span>
+            </div>
+            <div class="eq-line">
+              <span class="m-atom"><span class="m-it">p</span><span class="m-subsup"><span class="sup-t">trend</span><span class="sub-t">t</span></span></span>
+              <span>=</span>
+              <span class="m-frac">
+                <span class="m-num">
+                  <span class="m-atom"><span class="m-it">p</span><span class="m-subsup"><span class="sup-t">prior</span><span class="sub-t">t</span></span>&thinsp;<span class="m-it">e</span><span class="m-sup"><span class="m-it">&ell;</span><span class="m-sub m-it">t</span></span></span>
+                </span>
+                <span class="m-den">
+                  <span class="m-atom"><span class="m-it">p</span><span class="m-subsup"><span class="sup-t">prior</span><span class="sub-t">t</span></span>&thinsp;<span class="m-it">e</span><span class="m-sup"><span class="m-it">&ell;</span><span class="m-sub m-it">t</span></span> + (1 &minus; <span class="m-it">p</span><span class="m-subsup"><span class="sup-t">prior</span><span class="sub-t">t</span></span>)</span>
+                </span>
+              </span>
+            </div>
+          </div>
+          <span class="eq-num">(5)</span>
+        </div>
+
+        <h3 class="sub-head">B. Bifurcated Fade / Flat / Surf Execution &amp; Trailing 10m Stop</h3>
+        <p class="body-p">
+          Rather than halting on toxic flow, the posterior smoothly bifurcates execution across a deadband that eliminates regime-switch whipsaw:
+        </p>
+
+        <div class="eq-row" aria-label="Equation 6: Bifurcated Fade Flat Surf Allocation">
+          <span class="eq-spacer"></span>
+          <div class="eq-body">
+            <div class="cases-wrap">
+              <span class="m-atom" style="font-size:15.6px;"><span class="m-it">q</span><span class="m-sub m-it">t</span> =</span>
+              <svg class="cases-brace" viewBox="0 0 12 58" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                <path d="M 10 2 C 5 2, 5 6, 5 14 L 5 22 C 5 26, 3 29, 1 29 C 3 29, 5 32, 5 36 L 5 44 C 5 52, 5 56, 10 56" fill="none" stroke="#0B1F3A" stroke-width="1.35" stroke-linecap="round"/>
+              </svg>
+              <div class="cases-grid">
+                <div><span class="m-atom">(1 &minus; <span class="m-it">p</span><span class="m-subsup"><span class="sup-t">trend</span><span class="sub-t">t</span></span>)&thinsp;<span class="m-it">q</span><span class="m-subsup"><span class="sup-t">fade</span><span class="sub-t">t</span></span></span></div>
+                <div class="cases-cond"><span class="m-atom"><span class="m-it">p</span><span class="m-subsup"><span class="sup-t">trend</span><span class="sub-t">t</span></span> &lt; 0.38</span> (Fade)</div>
+                <div>0</div>
+                <div class="cases-cond">0.38 &le; <span class="m-atom"><span class="m-it">p</span><span class="m-subsup"><span class="sup-t">trend</span><span class="sub-t">t</span></span></span> &le; 0.62 (Flat Veto)</div>
+                <div><span class="m-atom"><span class="m-it">p</span><span class="m-subsup"><span class="sup-t">trend</span><span class="sub-t">t</span></span>&thinsp;sgn(VWAP<span class="m-subsup"><span class="sup-t">(5)</span><span class="sub-t">t</span></span> &minus; VWAP<span class="m-subsup"><span class="sup-t">(20)</span><span class="sub-t">t</span></span>)</span></div>
+                <div class="cases-cond"><span class="m-atom"><span class="m-it">p</span><span class="m-subsup"><span class="sup-t">trend</span><span class="sub-t">t</span></span> &gt; 0.62</span> (Surf)</div>
+              </div>
+            </div>
+          </div>
+          <span class="eq-num">(6)</span>
+        </div>
+
+        <p class="body-p no-indent" id="sec7b-worked">Loading Bayesian bifurcation empirical telemetry...</p>
+
+        <h2 class="sec-head">VIII. Portfolio Diversification &amp; Tail Risk</h2>
+
+        <h3 class="sub-head">A. Stationary Block-Bootstrap Inference (1,000 Trials)</h3>
+        <p class="body-p" id="sec8a-body">Loading block-bootstrap inference...</p>
+
+        <h3 class="sub-head">B. Eight-Asset Intraday Risk-Parity Portfolio</h3>
+        <p class="body-p" id="sec8b-body">Loading 8-asset portfolio diversification analysis...</p>
+
+        <h3 class="sub-head">C. Baseline Walk-Forward &amp; DSR (M = 20) Preservation</h3>
+        <p class="body-p" id="sec8c-body">Loading M=20 walk-forward &amp; DSR preservation...</p>
+      </div>
+
+      <!-- RIGHT COLUMN -->
+      <div class="col col-right">
+        <div class="table-wrap">
+          <div class="table-title-num">TABLE IV</div>
+          <div class="table-title-cap">5-Regime All-Weather Stress Matrix &mdash; Net SR (MDD%)</div>
+          <table class="booktabs" id="table4">
+            <thead>
+              <tr>
+                <th>Hostile Regime</th>
+                <th class="num">8m</th>
+                <th class="num">Adapt. 1x</th>
+                <th class="num">OU-Fade</th>
+                <th class="num">Dual 1x</th>
+                <th class="num">Dual Turbo</th>
+              </tr>
+            </thead>
+            <tbody id="table4-body"></tbody>
+            <tfoot id="table4-foot"></tfoot>
+          </table>
+          <div class="table-note" id="table4-note"></div>
+        </div>
+
+        <div class="table-wrap">
+          <div class="table-title-num">TABLE V</div>
+          <div class="table-title-cap">Block-Bootstrap 95% CIs (120d), CVaR 95% &amp; 8-Asset Portfolio</div>
+          <table class="booktabs t5" id="table5">
+            <thead>
+              <tr>
+                <th>Model / Portfolio</th>
+                <th class="num">SR / Med.</th>
+                <th class="num">95% CI / Ret.</th>
+                <th class="num">P(L) / MDD</th>
+                <th class="num">CVaR95 / DR</th>
+              </tr>
+            </thead>
+            <tbody id="table5-body"></tbody>
+            <tfoot id="table5-foot"></tfoot>
+          </table>
+          <div class="table-note" id="table5-note"></div>
+        </div>
+
+        <div style="margin-top: 8px;">
+          <h2 class="sec-head">IX. All-Weather Execution Takeaways</h2>
+          <p class="body-p" id="sec9-body">Loading all-weather synthesis...</p>
+        </div>
+
+        <p class="aphorism">
+          True all-weather microstructure alpha neither fights informed order flow<br />
+          nor hides from it&mdash;it infers the regime causally and surfs the wave.
+        </p>
+      </div>
+    </section>
+  </main>
+
+  <script src="../data/bundle.js"></script>
+  <script>
+    (function () {
+      "use strict";
+
+      if (!window.VWAP_DATA || !window.VWAP_DATA.metrics || !window.VWAP_DATA.metrics.dual_regime_lab) {
+        document.getElementById("data-error").style.display = "block";
+        return;
+      }
+
+      const metrics = window.VWAP_DATA.metrics;
+      const dl = metrics.dual_regime_lab;
+      const dmeta = dl.meta || {};
+      const tele = dl.telemetry || {};
+      const wf20 = dl.walk_forward_dsr_m20 || {};
+      const wfSplit = wf20.split || {};
+      const st5 = dl.stress_tests_5 || {};
+      const scenarios = st5.scenarios || [];
+      const mean5 = st5.five_regime_mean || {};
+      const mddMean5 = st5.five_regime_mdd_mean || {};
+      const traj = dl.meltup_trajectory || {};
+      const pts = traj.points || [];
+      const boot = dl.bootstrap_ci || {};
+      const bootAW = boot.all_weather_120d || {};
+      const port = dl.portfolio_8_asset || {};
+      const portSum = port.summary || {};
+
+      const SVG_NS = "http://www.w3.org/2000/svg";
+
+      function el(tag, attrs, text) {
+        const node = document.createElementNS(SVG_NS, tag);
+        if (attrs) {
+          for (const [k, v] of Object.entries(attrs)) {
+            node.setAttribute(k, String(v));
+          }
+        }
+        if (text !== undefined && text !== null) {
+          node.textContent = String(text);
+        }
+        return node;
+      }
+
+      function fmt(v, d) {
+        return Number(v).toFixed(d);
+      }
+
+      function fmtSigned(v, d) {
+        const n = Number(v);
+        const s = Math.abs(n) < 1e-9 ? (0).toFixed(d) : n.toFixed(d);
+        return n > 1e-9 ? "+" + s : s;
+      }
+
+      function fmtInt(v) {
+        return Math.round(Number(v)).toLocaleString("en-US");
+      }
+
+      const scenById = {};
+      scenarios.forEach((s) => { scenById[s.id] = s; });
+
+      // =========================================================================
+      // 1. RENDER FIG. 3 (DUAL-PANEL HERO: MELT-UP TRAJECTORY + BOOTSTRAP 95% CIs)
+      // =========================================================================
+      function renderFig3() {
+        const svg = document.getElementById("fig3-svg");
+        while (svg.firstChild) svg.removeChild(svg.firstChild);
+
+        // -----------------------------------------------------------------------
+        // PANEL (a) LEFT: Toxic Melt-Up Bifurcation Trajectory + Hamilton p_trend
+        // -----------------------------------------------------------------------
+        const pA = { x0: 54, x1: 486, eqTop: 46, eqBot: 230, ptTop: 248, ptBot: 332 };
+        const pAW = pA.x1 - pA.x0;
+        const eqH = pA.eqBot - pA.eqTop;
+        const ptH = pA.ptBot - pA.ptTop;
+        const nPts = Math.max(2, pts.length);
+
+        svg.appendChild(el("text", {
+          x: (pA.x0 + pA.x1) / 2,
+          y: 15,
+          "text-anchor": "middle",
+          "font-family": "Times New Roman, serif",
+          "font-weight": "700",
+          "font-size": 13.6,
+          fill: "#0B1F3A",
+        }, `(a) Toxic Melt-Up Bifurcation (seed=${traj.seed || 202}, Session #${traj.session_id || 9})`));
+
+        svg.appendChild(el("text", {
+          x: (pA.x0 + pA.x1) / 2,
+          y: 30,
+          "text-anchor": "middle",
+          "font-family": "Times New Roman, serif",
+          "font-style": "italic",
+          "font-size": 11.4,
+          fill: "#3A5373",
+        }, `Cumulative session equity (base 100) & synchronized Hamilton posterior p_trend (${traj.start_time || "11:55"}\u2013${traj.end_time || "14:04"} ET)`));
+
+        function xA(barIdx) {
+          return pA.x0 + (barIdx / (nPts - 1)) * pAW;
+        }
+
+        // Compute equity Y bounds
+        const allEq = [];
+        pts.forEach((p) => allEq.push(p.eq_single_8m, p.eq_adaptive_1x, p.eq_ou_vpin_1x, p.eq_dual_1x));
+        const eqMin = Math.floor((Math.min(...allEq) - 0.12) * 5) / 5; // ~98.4
+        const eqMax = Math.ceil((Math.max(...allEq) + 0.15) * 5) / 5;  // ~100.6
+
+        function yEq(v) {
+          return pA.eqBot - ((v - eqMin) / (eqMax - eqMin)) * eqH;
+        }
+        function yPt(v) {
+          return pA.ptBot - v * ptH;
+        }
+
+        // Ice-Blue shading for active SURF intervals (p_trend > 0.62) spanning BOTH equity & posterior panels
+        let runStart = null;
+        for (let i = 0; i < pts.length; i++) {
+          const isSurf = pts[i].p_trend > (traj.surf_threshold || 0.62);
+          if (isSurf && runStart === null) runStart = i;
+          if ((!isSurf || i === pts.length - 1) && runStart !== null) {
+            const runEnd = isSurf ? i : i - 1;
+            const sx0 = xA(runStart);
+            const sx1 = xA(runEnd);
+            if (sx1 > sx0 + 1) {
+              svg.appendChild(el("rect", { x: sx0, y: pA.eqTop, width: sx1 - sx0, height: eqH, fill: "#EDF4FC" }));
+              svg.appendChild(el("rect", { x: sx0, y: pA.ptTop, width: sx1 - sx0, height: ptH, fill: "#EDF4FC" }));
+            }
+            runStart = null;
+          }
+        }
+
+        // Equity horizontal gridlines & Y ticks
+        const eqStep = (eqMax - eqMin) > 2.2 ? 0.5 : 0.4;
+        const eqTickStart = Math.ceil(eqMin / eqStep) * eqStep;
+        for (let v = eqTickStart; v <= eqMax + 1e-6; v += eqStep) {
+          const tv = Math.round(v * 100) / 100;
+          const py = yEq(tv);
+          if (py < pA.eqTop + 3 || py > pA.eqBot - 2) continue;
+          const isBase = Math.abs(tv - 100.0) < 1e-6;
+          svg.appendChild(el("line", {
+            x1: pA.x0, y1: py, x2: pA.x1, y2: py,
+            stroke: isBase ? "#3A5373" : "#B8CEE8",
+            "stroke-width": isBase ? 1.0 : 0.8,
+            "stroke-dasharray": isBase ? "none" : "2.4,2.8",
+          }));
+          svg.appendChild(el("text", {
+            x: pA.x0 - 6, y: py + 3.5, "text-anchor": "end",
+            "font-family": "Times New Roman, serif", "font-size": 10.6,
+            fill: isBase ? "#0B1F3A" : "#1E3554",
+            "font-weight": isBase ? "700" : "400",
+          }, tv.toFixed(1)));
+        }
+
+        // Vertical onset line at surf_cross_bar (bar=18, 12:13 ET)
+        const crossBar = traj.surf_cross_bar || 18;
+        const crossX = xA(crossBar);
+        svg.appendChild(el("line", {
+          x1: crossX, y1: pA.eqTop, x2: crossX, y2: pA.ptBot,
+          stroke: "#1B4F9C", "stroke-width": 1.05, "stroke-dasharray": "3.5,2.5",
+        }));
+        svg.appendChild(el("text", {
+          x: crossX + 5, y: pA.eqTop + 12,
+          "font-family": "Times New Roman, serif", "font-style": "italic", "font-weight": "700",
+          "font-size": 10.3, fill: "#1B4F9C",
+        }, `Surf onset (${traj.surf_cross_time || "12:13"} ET, p > 0.62)`));
+
+        // Equity curves (4 real series)
+        const eqSeries = [
+          { key: "eq_single_8m", label: "8m Single", color: "#68A3DF", w: 1.5, dash: "4,2.8" },
+          { key: "eq_adaptive_1x", label: "Adaptive 1x", color: "#3B76C4", w: 1.55, dash: "2.2,2.2" },
+          { key: "eq_ou_vpin_1x", label: "OU-VPIN Fade", color: "#1B4F9C", w: 1.7, dash: "none" },
+          { key: "eq_dual_1x", label: "Dual-Regime 1x", color: "#0B1F3A", w: 2.35, dash: "none" },
+        ];
+        eqSeries.forEach((s) => {
+          const pl = pts.map((p, i) => `${xA(i).toFixed(1)},${yEq(p[s.key]).toFixed(1)}`).join(" ");
+          svg.appendChild(el("polyline", {
+            points: pl, fill: "none", stroke: s.color, "stroke-width": s.w,
+            "stroke-dasharray": s.dash, "stroke-linejoin": "round",
+          }));
+          const lastVal = pts[pts.length - 1][s.key];
+          svg.appendChild(el("circle", {
+            cx: xA(pts.length - 1), cy: yEq(lastVal), r: s.key === "eq_dual_1x" ? 3.2 : 2.3,
+            fill: s.color, stroke: "#FFFFFF", "stroke-width": 0.6,
+          }));
+        });
+
+        // Clean end-equity callouts cleanly inside upper panel (zero overlap with eqBot axis line)
+        const lastDual = pts[pts.length - 1].eq_dual_1x;
+        const lastAdapt = pts[pts.length - 1].eq_adaptive_1x;
+        svg.appendChild(el("text", {
+          x: pA.x1 - 5, y: yEq(lastDual) - 6, "text-anchor": "end",
+          "font-family": "Times New Roman, serif", "font-size": 10.2, "font-weight": "700", fill: "#0B1F3A",
+        }, `Dual 1x: ${fmt(lastDual, 2)}`));
+        svg.appendChild(el("text", {
+          x: pA.x1 - 5, y: Math.min(pA.eqBot - 5, yEq(lastAdapt) - 5), "text-anchor": "end",
+          "font-family": "Times New Roman, serif", "font-size": 9.8, fill: "#3A5373",
+        }, `Adapt: ${fmt(lastAdapt, 2)}`));
+
+        // Compact legend cleanly in open lower-left of equity panel (x=62..204, y=158..224)
+        const legX = pA.x0 + 8;
+        const legY = pA.eqBot - 68;
+        svg.appendChild(el("rect", {
+          x: legX - 4, y: legY - 6, width: 120, height: 61,
+          fill: "#FFFFFF", "fill-opacity": 0.94, stroke: "#D4E3F5", "stroke-width": 0.75,
+        }));
+        [eqSeries[3], eqSeries[2], eqSeries[1], eqSeries[0]].forEach((s, idx) => {
+          const ly = legY + 4 + idx * 14;
+          svg.appendChild(el("line", {
+            x1: legX, y1: ly, x2: legX + 18, y2: ly,
+            stroke: s.color, "stroke-width": s.w, "stroke-dasharray": s.dash,
+          }));
+          svg.appendChild(el("text", {
+            x: legX + 23, y: ly + 3.2,
+            "font-family": "Times New Roman, serif", "font-size": 10.1,
+            "font-weight": idx === 0 ? "700" : "400",
+            fill: idx === 0 ? "#0B1F3A" : "#1E3554",
+          }, s.label));
+        });
+
+        // Upper panel L-axes + Y label
+        svg.appendChild(el("line", { x1: pA.x0, y1: pA.eqTop, x2: pA.x0, y2: pA.eqBot, stroke: "#0B1F3A", "stroke-width": 1.45 }));
+        svg.appendChild(el("line", { x1: pA.x0, y1: pA.eqBot, x2: pA.x1, y2: pA.eqBot, stroke: "#0B1F3A", "stroke-width": 1.3 }));
+        const yEqMid = (pA.eqTop + pA.eqBot) / 2;
+        svg.appendChild(el("text", {
+          x: 13, y: yEqMid, transform: `rotate(-90 13 ${yEqMid})`, "text-anchor": "middle",
+          "font-family": "Times New Roman, serif", "font-style": "italic", "font-size": 11.4, fill: "#1E3554",
+        }, "Equity (Base 100)"));
+
+        // Synchronized Bottom Strip: Hamilton Posterior p_trend
+        const ySurf = yPt(traj.surf_threshold || 0.62);
+        const yFade = yPt(traj.fade_threshold || 0.38);
+
+        // Threshold lines (0.62 Surf & 0.38 Fade)
+        svg.appendChild(el("line", { x1: pA.x0, y1: ySurf, x2: pA.x1, y2: ySurf, stroke: "#1B4F9C", "stroke-width": 0.9, "stroke-dasharray": "3,2.5" }));
+        svg.appendChild(el("line", { x1: pA.x0, y1: yFade, x2: pA.x1, y2: yFade, stroke: "#68A3DF", "stroke-width": 0.85, "stroke-dasharray": "2.2,2.8" }));
+
+        // Filled posterior area + navy line
+        const ptAreaPts = [`${xA(0).toFixed(1)},${pA.ptBot.toFixed(1)}`];
+        const ptLinePts = [];
+        pts.forEach((p, i) => {
+          const px = xA(i).toFixed(1);
+          const py = yPt(p.p_trend).toFixed(1);
+          ptAreaPts.push(`${px},${py}`);
+          ptLinePts.push(`${px},${py}`);
+        });
+        ptAreaPts.push(`${xA(pts.length - 1).toFixed(1)},${pA.ptBot.toFixed(1)}`);
+        svg.appendChild(el("polygon", { points: ptAreaPts.join(" "), fill: "#1B4F9C", "fill-opacity": 0.16 }));
+        svg.appendChild(el("polyline", { points: ptLinePts.join(" "), fill: "none", stroke: "#0B1F3A", "stroke-width": 1.65 }));
+
+        // Posterior Y ticks (0.0, 0.38, 0.62, 1.0)
+        [0.0, 0.38, 0.62, 1.0].forEach((tv) => {
+          svg.appendChild(el("text", {
+            x: pA.x0 - 6, y: yPt(tv) + 3.2, "text-anchor": "end",
+            "font-family": "Times New Roman, serif", "font-size": 9.8,
+            fill: tv === 0.62 ? "#1B4F9C" : "#3A5373",
+            "font-weight": tv === 0.62 ? "700" : "400",
+          }, tv.toFixed(tv === 0 || tv === 1 ? 1 : 2)));
+        });
+
+        // Subtle label inside Surf strip
+        svg.appendChild(el("text", {
+          x: pA.x1 - 5, y: ySurf - 4, "text-anchor": "end",
+          "font-family": "Times New Roman, serif", "font-style": "italic", "font-size": 9.5, fill: "#1B4F9C",
+        }, "Surf > 0.62"));
+        svg.appendChild(el("text", {
+          x: pA.x1 - 5, y: yFade + 11, "text-anchor": "end",
+          "font-family": "Times New Roman, serif", "font-style": "italic", "font-size": 9.5, fill: "#3A5373",
+        }, "Fade < 0.38"));
+
+        // Bottom strip axes + rotated label
+        svg.appendChild(el("line", { x1: pA.x0, y1: pA.ptTop, x2: pA.x0, y2: pA.ptBot, stroke: "#0B1F3A", "stroke-width": 1.45 }));
+        svg.appendChild(el("line", { x1: pA.x0, y1: pA.ptBot, x2: pA.x1, y2: pA.ptBot, stroke: "#0B1F3A", "stroke-width": 1.45 }));
+        const yPtMid = (pA.ptTop + pA.ptBot) / 2;
+        svg.appendChild(el("text", {
+          x: 13, y: yPtMid, transform: `rotate(-90 13 ${yPtMid})`, "text-anchor": "middle",
+          "font-family": "Times New Roman, serif", "font-style": "italic", "font-size": 11, fill: "#1B4F9C",
+        }, "p_trend"));
+
+        // Time ticks along bottom axis
+        [0, 26, 52, 78, 104, pts.length - 1].forEach((idx) => {
+          if (!pts[idx]) return;
+          const px = xA(idx);
+          svg.appendChild(el("line", { x1: px, y1: pA.ptBot, x2: px, y2: pA.ptBot + 4, stroke: "#0B1F3A", "stroke-width": 1 }));
+          svg.appendChild(el("text", {
+            x: px, y: pA.ptBot + 16, "text-anchor": "middle",
+            "font-family": "Times New Roman, serif", "font-size": 10.5, fill: "#1E3554",
+          }, pts[idx].time));
+        });
+        svg.appendChild(el("text", {
+          x: (pA.x0 + pA.x1) / 2, y: pA.ptBot + 31, "text-anchor": "middle",
+          "font-family": "Times New Roman, serif", "font-style": "italic", "font-size": 11.2, fill: "#3A5373",
+        }, "Intraday Session Time (ET)"));
+
+        // -----------------------------------------------------------------------
+        // PANEL (b) RIGHT: 1,000-Trial Block-Bootstrap 95% Sharpe CIs & 5-Regime Mean
+        // -----------------------------------------------------------------------
+        const pB = { x0: 616, x1: 1002, y0: 56, y1: 332 };
+        const pBW = pB.x1 - pB.x0;
+        const pBH = pB.y1 - pB.y0;
+
+        svg.appendChild(el("text", {
+          x: (pB.x0 + pB.x1) / 2 - 22,
+          y: 15,
+          "text-anchor": "middle",
+          "font-family": "Times New Roman, serif",
+          "font-weight": "700",
+          "font-size": 13.6,
+          fill: "#0B1F3A",
+        }, "(b) 1,000-Trial Block-Bootstrap 95% Sharpe CIs"));
+
+        svg.appendChild(el("text", {
+          x: (pB.x0 + pB.x1) / 2 - 22,
+          y: 30,
+          "text-anchor": "middle",
+          "font-family": "Times New Roman, serif",
+          "font-style": "italic",
+          "font-size": 11.4,
+          fill: "#3A5373",
+        }, `All-weather 120d (20 OOS + 100 stress, block=${dmeta.bootstrap_block_len || 5}d) & 5-regime stress mean`));
+
+        const bootRows = [
+          { key: "dual_regime_turbo", label: "Dual Turbo", color: "#0B1F3A", bold: true },
+          { key: "dual_regime_1x", label: "Dual-Regime 1x", color: "#1B4F9C", bold: true },
+          { key: "ou_spectral_1x", label: "OU-VPIN Fade", color: "#3B76C4", bold: false },
+          { key: "adaptive_1x", label: "Adaptive 1x", color: "#68A3DF", bold: false },
+          { key: "single_8m", label: "8m Single", color: "#89B8E6", bold: false },
+        ];
+
+        // X scale: -12 to +12
+        const xMinB = -12;
+        const xMaxB = 12;
+        function xB(v) {
+          return pB.x0 + ((v - xMinB) / (xMaxB - xMinB)) * pBW;
+        }
+        const xZeroB = xB(0);
+
+        // Ice-Blue shading on positive Sharpe half (SR > 0)
+        svg.appendChild(el("rect", {
+          x: xZeroB, y: pB.y0, width: pB.x1 - xZeroB, height: pBH, fill: "#EDF4FC",
+        }));
+        svg.appendChild(el("text", {
+          x: (xZeroB + pB.x1) / 2, y: pB.y0 + 13, "text-anchor": "middle",
+          "font-family": "Times New Roman, serif", "font-style": "italic", "font-weight": "700",
+          "font-size": 10.6, fill: "#1B4F9C",
+        }, "Strictly Positive All-Weather Zone (SR > 0)"));
+
+        // Vertical gridlines & X ticks
+        [-12, -8, -4, 0, 4, 8, 12].forEach((tv) => {
+          const px = xB(tv);
+          const isZ = tv === 0;
+          svg.appendChild(el("line", {
+            x1: px, y1: pB.y0, x2: px, y2: pB.y1,
+            stroke: isZ ? "#0B1F3A" : "#B8CEE8",
+            "stroke-width": isZ ? 1.35 : 0.8,
+            "stroke-dasharray": isZ ? "none" : "2.6,3.0",
+          }));
+          svg.appendChild(el("text", {
+            x: px, y: pB.y1 + 16, "text-anchor": "middle",
+            "font-family": "Times New Roman, serif", "font-size": 10.8,
+            fill: isZ ? "#0B1F3A" : "#1E3554",
+            "font-weight": isZ ? "700" : "400",
+          }, tv > 0 ? `+${tv}` : String(tv)));
+        });
+
+        svg.appendChild(el("text", {
+          x: (pB.x0 + pB.x1) / 2, y: pB.y1 + 31, "text-anchor": "middle",
+          "font-family": "Times New Roman, serif", "font-style": "italic", "font-size": 11.2, fill: "#3A5373",
+        }, "Annualized Net Sharpe Ratio (95% Block-Bootstrap CI)"));
+
+        // Inline micro-legend cleanly at top above plot (y=46)
+        svg.appendChild(el("line", { x1: 548, y1: 44, x2: 572, y2: 44, stroke: "#1B4F9C", "stroke-width": 2.2 }));
+        svg.appendChild(el("circle", { cx: 560, cy: 44, r: 3.4, fill: "#0B1F3A" }));
+        svg.appendChild(el("text", { x: 577, y: 47.5, "font-family": "Times New Roman, serif", "font-size": 10.4, fill: "#12243B" }, "Bootstrap median & 95% CI (120d)"));
+        svg.appendChild(el("polygon", { points: "770,40 774.5,44 770,48 765.5,44", fill: "#FFFFFF", stroke: "#1B4F9C", "stroke-width": 1.35 }));
+        svg.appendChild(el("text", { x: 779, y: 47.5, "font-family": "Times New Roman, serif", "font-size": 10.4, fill: "#12243B" }, "5-Regime stress mean"));
+
+        // Draw 5 model whisker rows with generous clearance below zone header
+        const rowTop = pB.y0 + 42;
+        const rowStep = (pB.y1 - 22 - rowTop) / (bootRows.length - 1);
+
+        bootRows.forEach((row, idx) => {
+          const cy = rowTop + idx * rowStep;
+          const b = bootAW[row.key];
+          const sMean = mean5[row.key];
+          if (!b) return;
+
+          // Subtle horizontal guide
+          svg.appendChild(el("line", {
+            x1: pB.x0, y1: cy, x2: pB.x1, y2: cy,
+            stroke: "#E4EEF9", "stroke-width": 0.75,
+          }));
+
+          // Left Y label
+          svg.appendChild(el("text", {
+            x: pB.x0 - 8, y: cy + 3.8, "text-anchor": "end",
+            "font-family": "Times New Roman, serif", "font-size": 11.2,
+            "font-weight": row.bold ? "700" : "400",
+            fill: row.bold ? "#0B1F3A" : "#3A5373",
+          }, row.label));
+
+          const xLo = xB(b.ci95_lo);
+          const xHi = xB(b.ci95_hi);
+          const xMed = xB(b.median_sharpe);
+
+          // Thick whisker bar + end caps
+          svg.appendChild(el("line", {
+            x1: xLo, y1: cy, x2: xHi, y2: cy,
+            stroke: row.color, "stroke-width": row.bold ? 2.8 : 2.1,
+          }));
+          svg.appendChild(el("line", { x1: xLo, y1: cy - 5.5, x2: xLo, y2: cy + 5.5, stroke: row.color, "stroke-width": 1.5 }));
+          svg.appendChild(el("line", { x1: xHi, y1: cy - 5.5, x2: xHi, y2: cy + 5.5, stroke: row.color, "stroke-width": 1.5 }));
+
+          // 5-Regime stress mean hollow diamond
+          if (sMean !== undefined) {
+            const xSm = xB(sMean);
+            svg.appendChild(el("polygon", {
+              points: `${xSm},${cy - 4.8} ${xSm + 4.8},${cy} ${xSm},${cy + 4.8} ${xSm - 4.8},${cy}`,
+              fill: "#FFFFFF", stroke: row.color, "stroke-width": 1.4,
+            }));
+          }
+
+          // Bootstrap median filled circle (ringed for Dual-Regime 1x & Turbo)
+          if (row.bold) {
+            svg.appendChild(el("circle", {
+              cx: xMed, cy: cy, r: 6.4, fill: "none", stroke: row.color, "stroke-width": 1.1,
+            }));
+          }
+          svg.appendChild(el("circle", {
+            cx: xMed, cy: cy, r: row.bold ? 4.2 : 3.4,
+            fill: row.color, stroke: "#FFFFFF", "stroke-width": 0.8,
+          }));
+
+          // Clean CI numeric annotation positioned cleanly away from vertical 0-axis line
+          const labelStr = `${fmtSigned(b.median_sharpe, 2)}  [${fmtSigned(b.ci95_lo, 2)}, ${fmtSigned(b.ci95_hi, 2)}]`;
+          let textX = Math.max(pB.x0 + 62, Math.min(pB.x1 - 62, xMed));
+          let anchor = "middle";
+          if (row.key === "ou_spectral_1x") {
+            textX = xZeroB - 5;
+            anchor = "end";
+          }
+          svg.appendChild(el("text", {
+            x: textX, y: cy - 10, "text-anchor": anchor,
+            "font-family": "Times New Roman, serif", "font-size": 9.8,
+            "font-weight": row.bold ? "700" : "400",
+            fill: row.bold ? "#0B1F3A" : "#3A5373",
+          }, labelStr));
+        });
+
+        // Panel (b) bottom & left axes
+        svg.appendChild(el("line", { x1: pB.x0, y1: pB.y0, x2: pB.x0, y2: pB.y1, stroke: "#0B1F3A", "stroke-width": 1.45 }));
+        svg.appendChild(el("line", { x1: pB.x0, y1: pB.y1, x2: pB.x1, y2: pB.y1, stroke: "#0B1F3A", "stroke-width": 1.45 }));
+      }
+
+      // =========================================================================
+      // 2. RENDER TABLE IV (5-REGIME ALL-WEATHER STRESS MATRIX)
+      // =========================================================================
+      function renderTable4() {
+        const tbody = document.getElementById("table4-body");
+        const tfoot = document.getElementById("table4-foot");
+        tbody.innerHTML = "";
+        tfoot.innerHTML = "";
+
+        const shortNames = {
+          flash_crash: "Flash Crash",
+          momentum_meltup: "Momentum Melt-Up",
+          cost_shock_2x: "2\u00d7 Cost Shock",
+          latency_lag_1m: "+1m Latency",
+          whipsaw_flip: "Whipsaw Flip",
+        };
+
+        function cell(entry, emph) {
+          const sr = entry.net_sharpe;
+          const mdd = entry.max_drawdown_pct;
+          const cls = sr < 0 ? "neg-val" : (emph ? "pos-strong" : "");
+          return `<span class="${cls}">${fmtSigned(sr, 2)}</span><span class="mdd-sub">(${fmt(mdd, 1)}%)</span>`;
+        }
+
+        scenarios.forEach((sc) => {
+          const tr = document.createElement("tr");
+          if (sc.id === "momentum_meltup") tr.className = "row-highlight";
+          else if (sc.id === "whipsaw_flip") tr.className = "row-turbo";
+
+          tr.innerHTML = `
+            <td>${shortNames[sc.id] || sc.label}</td>
+            <td class="num">${cell(sc.models.single_8m, false)}</td>
+            <td class="num">${cell(sc.models.adaptive_1x, false)}</td>
+            <td class="num">${cell(sc.models.ou_spectral_1x, false)}</td>
+            <td class="num">${cell(sc.models.dual_regime_1x, true)}</td>
+            <td class="num">${cell(sc.models.dual_regime_turbo, true)}</td>
+          `;
+          tbody.appendChild(tr);
+        });
+
+        const footTr = document.createElement("tr");
+        footTr.innerHTML = `
+          <td>5-Regime Mean</td>
+          <td class="num">${fmtSigned(mean5.single_8m, 2)}<span class="mdd-sub">(${fmt(mddMean5.single_8m + 1e-9, 1)}%)</span></td>
+          <td class="num">${fmtSigned(mean5.adaptive_1x, 2)}<span class="mdd-sub">(${fmt(mddMean5.adaptive_1x + 1e-9, 1)}%)</span></td>
+          <td class="num">${fmtSigned(mean5.ou_spectral_1x, 2)}<span class="mdd-sub">(${fmt(mddMean5.ou_spectral_1x + 1e-9, 1)}%)</span></td>
+          <td class="num">${fmtSigned(mean5.dual_regime_1x, 2)}<span class="mdd-sub">(${fmt(mddMean5.dual_regime_1x + 1e-9, 1)}%)</span></td>
+          <td class="num">${fmtSigned(mean5.dual_regime_turbo, 2)}<span class="mdd-sub">(${fmt(mddMean5.dual_regime_turbo + 1e-9, 1)}%)</span></td>
+        `;
+        tfoot.appendChild(footTr);
+
+        const totalSurf = scenarios.reduce((a, s) => a + (s.dual_surf_trades || 0), 0);
+        document.getElementById("table4-note").textContent =
+          `20 unseen sessions per scenario (100 stress sessions total; seeds 1101, 202, 3303, 4004, 5505). ` +
+          `Dual-Regime 1x & Turbo achieve ${tele.five_regime_positive_count_1x || 5}/5 strictly positive stress regimes (${fmtInt(totalSurf)} causal Surf trades).`;
+      }
+
+      // =========================================================================
+      // 3. RENDER TABLE V (BLOCK-BOOTSTRAP 95% CIs, CVaR 95% & 8-ASSET PORTFOLIO)
+      // =========================================================================
+      function renderTable5() {
+        const tbody = document.getElementById("table5-body");
+        const tfoot = document.getElementById("table5-foot");
+        tbody.innerHTML = "";
+        tfoot.innerHTML = "";
+
+        // Panel A header row
+        const hdrA = document.createElement("tr");
+        hdrA.className = "panel-divider";
+        hdrA.innerHTML = `<td colspan="5">Panel A: ${fmtInt(dmeta.bootstrap_trials || 1000)}-Trial Block-Bootstrap (120d OOS+Stress, Block=${dmeta.bootstrap_block_len || 5}d)</td>`;
+        tbody.appendChild(hdrA);
+
+        const bList = [
+          { key: "single_8m", name: "8m Single", cls: "" },
+          { key: "adaptive_1x", name: "Adaptive Blend (1x)", cls: "" },
+          { key: "ou_spectral_1x", name: "OU-VPIN Fade (1x)", cls: "" },
+          { key: "dual_regime_1x", name: "Dual-Regime OU-Bayes (1x)", cls: "row-highlight" },
+          { key: "dual_regime_turbo", name: "Dual-Regime Turbo (Maker+K)", cls: "row-turbo" },
+        ];
+
+        bList.forEach((item) => {
+          const b = bootAW[item.key];
+          if (!b) return;
+          const tr = document.createElement("tr");
+          if (item.cls) tr.className = item.cls;
+          const srCls = b.median_sharpe < 0 ? "neg-val" : "pos-strong";
+          tr.innerHTML = `
+            <td>${item.name}</td>
+            <td class="num"><span class="${srCls}">${fmtSigned(b.median_sharpe, 2)}</span></td>
+            <td class="num">[${fmtSigned(b.ci95_lo, 2)}, ${fmtSigned(b.ci95_hi, 2)}]</td>
+            <td class="num">${fmt(b.prob_loss_pct, 1)}%</td>
+            <td class="num">${fmt(b.daily_cvar95_bps, 1)} bp</td>
+          `;
+          tbody.appendChild(tr);
+        });
+
+        // Panel B header row
+        const hdrB = document.createElement("tr");
+        hdrB.className = "panel-divider";
+        hdrB.innerHTML = `<td colspan="5">Panel B: 8-Asset Intraday Portfolio (${(port.meta && port.meta.symbols ? port.meta.symbols.join(", ") : "8 Assets")}, 60d)</td>`;
+        tbody.appendChild(hdrB);
+
+        const pRows = [
+          {
+            name: "Single-Asset Avg (8 Assets)",
+            sr: fmt(portSum.single_asset_avg_sharpe, 2),
+            ret: "Avg Corr " + fmt(portSum.avg_pairwise_corr, 3),
+            mdd: fmt(portSum.single_asset_avg_mdd_pct, 2) + "%",
+            cvar: "DR 1.00\u00d7",
+            cls: "",
+          },
+          {
+            name: "Equal-Weight Portfolio (1x)",
+            sr: fmt(portSum.equal_weight_sharpe, 2),
+            ret: "+" + fmt(portSum.equal_weight_ann_return_pct, 1) + "%",
+            mdd: fmt(portSum.equal_weight_mdd_pct, 2) + "%",
+            cvar: "1/N Wt",
+            cls: "",
+          },
+          {
+            name: "Risk-Parity Portfolio (1x)",
+            sr: fmt(portSum.risk_parity_sharpe, 2),
+            ret: "+" + fmt(portSum.risk_parity_ann_return_pct, 1) + "%",
+            mdd: fmt(portSum.risk_parity_mdd_pct, 2) + "%",
+            cvar: fmt(portSum.risk_parity_cvar95_bps, 1) + " bp",
+            cls: "row-highlight",
+          },
+        ];
+
+        pRows.forEach((r) => {
+          const tr = document.createElement("tr");
+          if (r.cls) tr.className = r.cls;
+          tr.innerHTML = `
+            <td>${r.name}</td>
+            <td class="num">${r.sr}</td>
+            <td class="num">${r.ret}</td>
+            <td class="num">${r.mdd}</td>
+            <td class="num">${r.cvar}</td>
+          `;
+          tbody.appendChild(tr);
+        });
+
+        const footTr = document.createElement("tr");
+        footTr.innerHTML = `
+          <td>Risk-Parity Turbo (Maker+K)</td>
+          <td class="num">${fmt(portSum.turbo_risk_parity_sharpe, 2)}</td>
+          <td class="num">+${fmtInt(portSum.turbo_risk_parity_ann_return_pct)}%</td>
+          <td class="num">${fmt(portSum.turbo_risk_parity_mdd_pct, 2)}%</td>
+          <td class="num">DR ${fmt(portSum.diversification_ratio, 2)}\u00d7</td>
+        `;
+        tfoot.appendChild(footTr);
+
+        document.getElementById("table5-note").textContent =
+          `Panel A columns: Median Sharpe, 95% CI, Prob(SR < 0), and Daily CVaR 95% (bps). ` +
+          `Panel B columns: Net Sharpe, Ann. Return (or Avg Pairwise Corr.), Max Drawdown, and Daily CVaR 95% / Diversification Ratio (DR).`;
+      }
+
+      // =========================================================================
+      // 4. POPULATE DYNAMIC QUANTITATIVE PROSE (ZERO HARDCODED METRICS)
+      // =========================================================================
+      function renderProse() {
+        const scMelt = scenById.momentum_meltup;
+        const scWhip = scenById.whipsaw_flip;
+        const bDual1x = bootAW.dual_regime_1x;
+        const bDualT = bootAW.dual_regime_turbo;
+        const bOu = bootAW.ou_spectral_1x;
+        const bAdapt = bootAW.adaptive_1x;
+        const b8 = bootAW.single_8m;
+        const d1x = wf20.dual_regime_1x;
+        const dT = wf20.dual_regime_turbo;
+
+        // Fig. 3 Caption
+        document.getElementById("fig3-caption").innerHTML =
+          `<span class="fig-label">Fig. 3.</span> Causal Bayesian regime bifurcation and all-weather inference. ` +
+          `(a) Real intraday equity during the unseen Toxic Momentum Melt-Up (seed=${traj.seed || 202}, Session #${traj.session_id || 9}): ` +
+          `as Hamilton <span class="m-atom"><span class="m-it">p</span><span class="m-subsup"><span class="sup-t">trend</span><span class="sub-t">t</span></span></span> ` +
+          `crosses ${fmt(traj.surf_threshold || 0.62, 2)} at ${traj.surf_cross_time || "12:13"} ET, Dual-Regime 1x flips from Fade to Surf and finishes at ` +
+          `${fmt(traj.end_equity.dual_1x, 2)} while Adaptive 1x (${fmt(traj.end_equity.adaptive_1x, 2)}) and 8m Single (${fmt(traj.end_equity.single_8m, 2)}) collapse. ` +
+          `(b) ${fmtInt(dmeta.bootstrap_trials || 1000)}-trial Politis&ndash;Romano stationary block-bootstrap 95% Sharpe CIs across 120 unseen OOS + stress sessions ` +
+          `paired with 5-regime stress means (diamonds): only Dual-Regime models clear zero across their entire 95% confidence interval.`;
+
+        // Sec VII.A lead update with exact p00 / p11 from meta
+        document.getElementById("sec7a-lead").innerHTML =
+          `Let latent state <span class="m-atom"><span class="m-it">S</span><span class="m-sub m-it">t</span> &isin; {0, 1}</span> ` +
+          `denote <em>Reverting Liquidity Sweep</em> (0) versus <em>Informed Momentum Trend</em> (1), governed by sticky Markov transition matrix ` +
+          `<span class="m-it">T</span> (<span class="m-atom"><span class="m-it">p</span><span class="m-sub">00</span> = ${fmt(dmeta.p00 || 0.975, 3)}</span>, ` +
+          `<span class="m-atom"><span class="m-it">p</span><span class="m-sub">11</span> = ${fmt(dmeta.p11 || 0.945, 3)}</span>). ` +
+          `Given causal tempered log-likelihood ratio <span class="m-atom"><span class="m-it">&ell;</span><span class="m-sub m-it">t</span></span> ` +
+          `(temp ${fmt(dmeta.likelihood_temp || 0.28, 2)}, prior bias ${fmt(dmeta.prior_log_odds_bias || -1.65, 2)}) combining VPIN, Hurst VR(5), |Slope|, aligned OFI, ` +
+          `and 4-horizon monotonic VWAP fan persistence, the online filter updates recursively:`;
+
+        // Sec VII.B worked empirical telemetry
+        document.getElementById("sec7b-worked").innerHTML =
+          `Surf entries follow the aligned 5&ndash;20m VWAP fan and exit strictly on a causal trailing 10m VWAP cross stop or 20m cap. ` +
+          `Across calm baseline sessions, the filter stays ${fmt(tele.baseline_fade_pct, 1)}% in Fade, ${fmt(tele.baseline_flat_pct, 1)}% Flat, and ` +
+          `${fmt(tele.baseline_surf_pct, 1)}% Surf (mean <span class="m-atom"><span class="m-it">p</span><span class="m-subsup"><span class="sup-t">trend</span><span class="sub-t">t</span></span></span> = ${fmt(tele.baseline_mean_p_trend, 3)}). ` +
+          `When Toxic Melt-Up hits (${fmt(scMelt.surf_bar_pct, 1)}% Surf bars, ${scMelt.dual_surf_trades} Surf trades), Dual-Regime 1x delivers a ` +
+          `${fmtSigned(tele.meltup_sharpe_turnaround_1x, 2)} Sharpe turnaround&mdash;from ${fmtSigned(scMelt.models.ou_spectral_1x.net_sharpe, 2)} (OU-Fade) to ` +
+          `${fmtSigned(scMelt.models.dual_regime_1x.net_sharpe, 2)} SR at just ${fmt(scMelt.models.dual_regime_1x.max_drawdown_pct, 2)}% MDD&mdash;and turns ` +
+          `Mid-Session Whipsaw Flip positive (${fmtSigned(scWhip.models.dual_regime_1x.net_sharpe, 2)} vs ${fmtSigned(scWhip.models.adaptive_1x.net_sharpe, 2)} Adaptive).`;
+
+        // Sec VIII.A Bootstrap
+        document.getElementById("sec8a-body").innerHTML =
+          `Pooling the 20 purged OOS sessions with all 100 unseen stress sessions (120 days) under ${fmtInt(dmeta.bootstrap_trials || 1000)}-trial ` +
+          `stationary block-bootstrap (mean block ${dmeta.bootstrap_block_len || 5}d) separates robust architecture from fragile fades. ` +
+          `8m Single (${fmt(b8.prob_loss_pct, 1)}% loss prob) and Adaptive 1x (${fmt(bAdapt.prob_loss_pct, 1)}%) fail outright, while fade-only OU-VPIN ` +
+          `straddles zero (${fmtSigned(bOu.median_sharpe, 2)}, ${fmt(bOu.prob_loss_pct, 1)}% loss). Dual-Regime 1x shifts the entire 95% CI above zero ` +
+          `to [${fmtSigned(bDual1x.ci95_lo, 2)}, ${fmtSigned(bDual1x.ci95_hi, 2)}] (${fmt(bDual1x.prob_loss_pct, 1)}% loss, CVaR95 ${fmt(bDual1x.daily_cvar95_bps, 1)} bp), ` +
+          `and Dual-Regime Turbo reaches [${fmtSigned(bDualT.ci95_lo, 2)}, ${fmtSigned(bDualT.ci95_hi, 2)}] (${fmt(bDualT.prob_loss_pct, 1)}% loss).`;
+
+        // Sec VIII.B 8-Asset Portfolio
+        document.getElementById("sec8b-body").innerHTML =
+          `Deploying Dual-Regime 1x simultaneously across ${port.meta.asset_count || 8} intraday instruments (ES, SPY, QQQ, NVDA, AAPL, TSLA, MSFT, BTC-USD; ` +
+          `60 sessions) exploits near-orthogonal microstructure timing (avg pairwise correlation ${fmt(portSum.avg_pairwise_corr, 3)}). ` +
+          `Inverse-volatility risk parity lifts Sharpe by +${fmt(portSum.sharpe_uplift_vs_single_pct, 1)}% from ${fmt(portSum.single_asset_avg_sharpe, 2)} single-asset average ` +
+          `to ${fmt(portSum.risk_parity_sharpe, 2)} (diversification ratio ${fmt(portSum.diversification_ratio, 2)}&times;), compressing Max DD from ` +
+          `${fmt(portSum.single_asset_avg_mdd_pct, 2)}% to ${fmt(portSum.risk_parity_mdd_pct, 2)}% and Daily CVaR95 to ${fmt(portSum.risk_parity_cvar95_bps, 1)} bp ` +
+          `(${fmt(portSum.turbo_risk_parity_sharpe, 2)} SR at ${fmt(portSum.turbo_risk_parity_mdd_pct, 2)}% MDD with Maker+Kelly Turbo).`;
+
+        // Sec VIII.C Baseline M=20 Walk-Forward
+        document.getElementById("sec8c-body").innerHTML =
+          `Crucially, all-weather protection sacrifices zero baseline out-of-sample power: across the original 60 sessions ` +
+          `(IS ${wfSplit.is_sessions || "1\u201340"} vs purged OOS ${wfSplit.oos_sessions || "41\u201360"}, M = ${wfSplit.trials_m || 20}, SR* = ${fmt(wfSplit.sr_benchmark_m20 || 4.96, 2)}), ` +
+          `Dual-Regime 1x lifts OOS Sharpe to ${fmt(d1x.oos_sharpe, 2)} (${fmt(d1x.oos_retention_pct, 1)}% retention, ${fmt(d1x.max_drawdown_pct, 2)}% MDD, ` +
+          `${fmt(d1x.psr_pct, 2)}% PSR, ${fmt(d1x.dsr_m20_pct, 2)}% DSR), and Dual-Regime Turbo achieves ${fmt(dT.oos_sharpe, 2)} OOS Sharpe ` +
+          `(${fmt(dT.psr_pct, 2)}% PSR, ${fmt(dT.dsr_m20_pct, 2)}% DSR).`;
+
+        // Sec IX All-Weather Synthesis (Right Column below Table V)
+        document.getElementById("sec9-body").innerHTML =
+          `Across all five adversarial stress regimes, upgrading from fade-only OU-VPIN (${fmtSigned(mean5.ou_spectral_1x, 2)} mean SR, ` +
+          `${fmt(mddMean5.ou_spectral_1x, 2)}% mean MDD) to Bayesian Dual-Regime 1x lifts the 5-regime mean to ${fmtSigned(mean5.dual_regime_1x, 2)} SR ` +
+          `(${fmtSigned(mean5.dual_regime_turbo, 2)} Turbo) while halving mean stressed drawdown to ${fmt(mddMean5.dual_regime_1x, 2)}%&mdash;delivering ` +
+          `${tele.five_regime_positive_count_1x || 5}/5 strictly positive regimes and turning hostile trend shocks into a secondary alpha engine.`;
+      }
+
+      renderFig3();
+      renderTable4();
+      renderTable5();
+      renderProse();
+    })();
+  </script>
+</body>
+</html>

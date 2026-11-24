@@ -33,6 +33,12 @@ from engine.research_lab import (
     compute_ou_spectral_entry_signals,
     compute_research_indicators,
 )
+from engine.dual_regime import (
+    FADE_THRESHOLD,
+    SURF_THRESHOLD,
+    backtest_session_dual_regime,
+    compute_hamilton_regime_filter,
+)
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 DATA_DIR = PROJECT_ROOT / "data"
@@ -484,6 +490,140 @@ class TestBlendedVwapEngine(unittest.TestCase):
                 1.0,
                 places=3,
             )
+
+    def test_10_dual_regime_bayes_causality_bootstrap_and_portfolio(self) -> None:
+        """Verify Phase 3 Hamilton Bayes filter causality (multi-cutoff), Dual-Regime backtest,
+        strictly positive Melt-Up Sharpe, 5-regime stress suite, bootstrap CIs, and 8-asset portfolio.
+        """
+        orig = self.sample_session
+        ind_orig = self.sample_ind
+        res_orig = compute_research_indicators(orig, ind_orig)
+        ham_orig = compute_hamilton_regime_filter(orig, ind_orig, res_orig)
+
+        # Mathematical bounds on Hamilton Bayesian posterior & fan alignment
+        self.assertEqual(len(ham_orig.p_trend), 390)
+        self.assertTrue(np.all(np.isfinite(ham_orig.p_trend)))
+        self.assertTrue(np.all((ham_orig.p_trend > 0.0) & (ham_orig.p_trend < 1.0)))
+        self.assertTrue(np.all((ham_orig.fan_score >= -1.0) & (ham_orig.fan_score <= 1.0)))
+        for p, mode in zip(ham_orig.p_trend, ham_orig.regime_modes):
+            if p < FADE_THRESHOLD:
+                self.assertEqual(mode, "FADE")
+            elif p > SURF_THRESHOLD:
+                self.assertEqual(mode, "SURF")
+            else:
+                self.assertEqual(mode, "FLAT")
+
+        # Multi-cutoff strict zero-lookahead causality audit across t0 in {40, 120, 180, 260}
+        for t0 in (40, 120, 180, 260):
+            pert = SessionData(
+                session_id=orig.session_id,
+                times=list(orig.times),
+                open=orig.open.copy(),
+                high=orig.high.copy(),
+                low=orig.low.copy(),
+                close=orig.close.copy(),
+                volume=orig.volume.copy(),
+                rel_vol=orig.rel_vol.copy(),
+                vol_regime=orig.vol_regime.copy(),
+                transient_impact_bps=orig.transient_impact_bps.copy(),
+            )
+            pert.open[t0 + 1 :] *= 1.42
+            pert.high[t0 + 1 :] *= 1.48
+            pert.low[t0 + 1 :] *= 0.65
+            pert.close[t0 + 1 :] *= 1.33
+            pert.volume[t0 + 1 :] *= 9.0
+            pert.rel_vol[t0 + 1 :] *= 9.0
+
+            ind_p = compute_session_indicators(pert)
+            res_p = compute_research_indicators(pert, ind_p)
+            ham_p = compute_hamilton_regime_filter(pert, ind_p, res_p)
+
+            np.testing.assert_allclose(ham_orig.p_trend[: t0 + 1], ham_p.p_trend[: t0 + 1], atol=1e-13)
+            np.testing.assert_allclose(ham_orig.fan_score[: t0 + 1], ham_p.fan_score[: t0 + 1], atol=1e-13)
+            np.testing.assert_allclose(ham_orig.fan_persist[: t0 + 1], ham_p.fan_persist[: t0 + 1], atol=1e-13)
+            np.testing.assert_allclose(ham_orig.llr[: t0 + 1], ham_p.llr[: t0 + 1], atol=1e-13)
+            self.assertEqual(ham_orig.regime_modes[: t0 + 1], ham_p.regime_modes[: t0 + 1])
+
+            for turbo_flag in (False, True):
+                _, _, _, eq_o = backtest_session_dual_regime(
+                    orig, ind_orig, res_orig, ham_orig, self.cfg, turbo_mode=turbo_flag, return_equity_curve=True
+                )
+                _, _, _, eq_p = backtest_session_dual_regime(
+                    pert, ind_p, res_p, ham_p, self.cfg, turbo_mode=turbo_flag, return_equity_curve=True
+                )
+                assert eq_o is not None and eq_p is not None
+                np.testing.assert_allclose(eq_o[: t0 + 1], eq_p[: t0 + 1], atol=1e-12)
+
+        # Standalone dual_regime.json == vwap_metrics.json["dual_regime_lab"] parity & enriched session bars
+        dual_path = DATA_DIR / "dual_regime.json"
+        metrics_path = DATA_DIR / "vwap_metrics.json"
+        session_path = DATA_DIR / "session_bars.json"
+        self.assertTrue(dual_path.exists(), "data/dual_regime.json missing")
+
+        dl = json.loads(dual_path.read_text(encoding="utf-8"))
+        metrics = json.loads(metrics_path.read_text(encoding="utf-8"))
+        session = json.loads(session_path.read_text(encoding="utf-8"))
+        self.assertEqual(metrics["dual_regime_lab"], dl)
+
+        for bar in session["bars"]:
+            self.assertIn("p_trend", bar)
+            self.assertIn("regime_mode", bar)
+            self.assertTrue(0.0 < bar["p_trend"] < 1.0)
+            self.assertIn(bar["regime_mode"], ("FADE", "FLAT", "SURF"))
+
+        # Walk-Forward & DSR (M=20) checks
+        wf20 = dl["walk_forward_dsr_m20"]
+        self.assertEqual(wf20["split"]["trials_m"], 20)
+        self.assertEqual(len(wf20["models"]), 8)
+        self.assertGreaterEqual(wf20["dual_regime_1x"]["oos_sharpe"], 6.5)
+        self.assertGreaterEqual(wf20["dual_regime_turbo"]["oos_sharpe"], 9.0)
+
+        # 5-Regime All-Weather Stress checks: ALL 5 positive including Toxic Melt-Up & Whipsaw Flip
+        st5 = dl["stress_tests_5"]
+        sc_map = {sc["id"]: sc for sc in st5["scenarios"]}
+        self.assertEqual(
+            set(sc_map.keys()),
+            {"flash_crash", "momentum_meltup", "cost_shock_2x", "latency_lag_1m", "whipsaw_flip"},
+        )
+        for sid, sc in sc_map.items():
+            self.assertGreater(sc["models"]["dual_regime_1x"]["net_sharpe"], 0.0, f"{sid} Dual 1x must be positive")
+            self.assertGreater(sc["models"]["dual_regime_turbo"]["net_sharpe"], 0.0, f"{sid} Dual Turbo must be positive")
+        mm = sc_map["momentum_meltup"]["models"]
+        self.assertGreater(mm["dual_regime_1x"]["net_sharpe"], 5.0)
+        self.assertGreater(mm["dual_regime_1x"]["net_sharpe"], mm["ou_spectral_1x"]["net_sharpe"] + 10.0)
+        self.assertGreater(st5["five_regime_mean"]["dual_regime_1x"], 0.0)
+        self.assertGreater(st5["five_regime_mean"]["dual_regime_turbo"], st5["five_regime_mean"]["dual_regime_1x"])
+
+        # Melt-Up Bifurcation Trajectory checks
+        traj = dl["meltup_trajectory"]
+        self.assertEqual(len(traj["points"]), 130)
+        self.assertLess(traj["points"][0]["p_trend"], FADE_THRESHOLD)
+        self.assertGreater(max(pt["p_trend"] for pt in traj["points"]), SURF_THRESHOLD)
+        self.assertGreater(traj["end_equity"]["dual_1x"], 100.0)
+        self.assertGreater(traj["end_equity"]["dual_1x"], traj["end_equity"]["adaptive_1x"])
+
+        # 1,000-Trial Stationary Block-Bootstrap CI ordering checks
+        boot = dl["bootstrap_ci"]
+        self.assertEqual(boot["n_trials"], 1000)
+        self.assertEqual(boot["block_len_sessions"], 5)
+        aw = boot["all_weather_120d"]
+        for mk in ("single_8m", "adaptive_1x", "ou_spectral_1x", "dual_regime_1x", "dual_regime_turbo"):
+            self.assertLess(aw[mk]["ci95_lo"], aw[mk]["median_sharpe"])
+            self.assertLess(aw[mk]["median_sharpe"], aw[mk]["ci95_hi"])
+        self.assertGreater(aw["dual_regime_1x"]["ci95_lo"], 0.0)
+        self.assertGreater(aw["dual_regime_turbo"]["ci95_lo"], 0.0)
+        self.assertGreater(aw["dual_regime_1x"]["median_sharpe"], aw["ou_spectral_1x"]["median_sharpe"])
+        self.assertGreater(aw["ou_spectral_1x"]["median_sharpe"], aw["adaptive_1x"]["median_sharpe"])
+
+        # 8-Asset Intraday Portfolio diversification checks
+        p8 = dl["portfolio_8_asset"]
+        self.assertEqual(len(p8["assets"]), 8)
+        self.assertAlmostEqual(sum(a["risk_parity_weight_pct"] for a in p8["assets"]), 100.0, delta=0.6)
+        ps = p8["summary"]
+        self.assertGreater(ps["risk_parity_sharpe"], ps["single_asset_avg_sharpe"] * 1.5)
+        self.assertGreater(ps["equal_weight_sharpe"], ps["single_asset_avg_sharpe"] * 1.5)
+        self.assertGreater(ps["diversification_ratio"], 1.5)
+        self.assertLess(ps["risk_parity_mdd_pct"], ps["single_asset_avg_mdd_pct"])
 
 
 if __name__ == "__main__":

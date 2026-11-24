@@ -222,9 +222,13 @@
                 <span class="dock-badge num" id="presetActiveLabel">Adaptive</span>
               </div>
               <div class="preset-grid" id="presetGrid">
+                <button class="preset-btn preset-frontier preset-dual" data-preset="dual_regime">
+                  <span class="preset-row-head"><span>Dual-Regime</span><span class="preset-pill-tag">Bayes</span></span>
+                  <small>Fade &harr; Surf p<sub>trend</sub></small>
+                </button>
                 <button class="preset-btn preset-frontier" data-preset="ou_spectral">
-                  <span class="preset-row-head"><span>OU-Spectral 5–20m</span><span class="preset-pill-tag">VPIN + &tau;&frac12;</span></span>
-                  <small>Volume-clock OU kernel &middot; curvature &amp; toxic-trend veto</small>
+                  <span class="preset-row-head"><span>OU-Spectral</span><span class="preset-pill-tag">VPIN</span></span>
+                  <small>OU &tau;&frac12; + toxic veto</small>
                 </button>
                 <button class="preset-btn active" data-preset="adaptive">
                   <span>Adaptive 5–20m</span>
@@ -378,17 +382,42 @@
               <span class="tel-item"><small>LAST</small><strong id="telLastPx">—</strong></span>
               <span class="tel-item"><small>VWAP</small><strong id="telVwapPx">—</strong></span>
               <span class="tel-item"><small>DEV</small><strong id="telSpreadBps">—</strong></span>
-              <span class="tel-item"><small>LIVE Z</small><strong class="tel-z" id="telLiveZ">—</strong></span>
+              <span class="tel-item"><small>Z</small><strong class="tel-z" id="telLiveZ">—</strong></span>
               <span class="tel-item"><small>OU &tau;&#189;</small><strong class="tel-ou" id="telOuTau">—</strong></span>
               <span class="tel-item"><small>VPIN</small><strong class="tel-vpin" id="telVpin">—</strong></span>
-              <span class="tel-item"><small>REL VOL</small><strong id="telRelVol">—</strong></span>
-              <span class="tel-item"><small>ENGINE</small><strong class="tel-speed" id="telEngineMs">—</strong></span>
+              <span class="tel-ptrend fade" id="telPTrendPill"><small>P(TREND)</small><strong id="telPTrend">—</strong></span>
+              <span class="tel-item"><small>VOL</small><strong id="telRelVol">—</strong></span>
+              <span class="tel-item"><small>ENG</small><strong class="tel-speed" id="telEngineMs">—</strong></span>
               <span class="tel-signal" id="telSignalState">WATCHING</span>
             </div>
 
             <div class="chart-stage" id="chartStage">
               <svg id="intradayChart" class="chart-svg" viewBox="0 0 1080 462" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Intraday Blended 5-20m VWAP chart with volume clock and Z-score panel"></svg>
               <div id="chartTooltip" class="inspector-tooltip"></div>
+            </div>
+          </div>
+
+          <!-- Live Paper-Trading Execution Desk -->
+          <div class="card paper-desk-card" id="paperDeskCard">
+            <div class="paper-desk-bar num">
+              <div class="pd-brand">
+                <span class="pd-title">Paper Execution Desk</span>
+                <span class="pd-pos flat" id="pdPositionBadge">FLAT · 0 sh</span>
+              </div>
+              <div class="pd-metrics">
+                <span class="pd-stat"><small>EQUITY</small><strong id="pdEquity">$100,000.00</strong></span>
+                <span class="pd-stat"><small>REALIZED</small><strong id="pdRealized">$0.00 (0.0bp)</strong></span>
+                <span class="pd-stat"><small>UNREALIZED</small><strong id="pdUnrealized">$0.00 (0.0bp)</strong></span>
+                <span class="pd-stat"><small>VWAP EXEC EDGE</small><strong id="pdVwapQuality">+0.00 bp</strong></span>
+                <span class="pd-stat"><small>FILLS</small><strong id="pdFillCount">0</strong></span>
+              </div>
+              <div class="pd-actions">
+                <button type="button" class="btn-pd btn-pd-buy" id="btnPaperBuy" title="Execute simulated paper Buy at current spot">Buy</button>
+                <button type="button" class="btn-pd btn-pd-sell" id="btnPaperSell" title="Execute simulated paper Sell at current spot">Sell</button>
+                <button type="button" class="btn-pd btn-pd-flat" id="btnPaperFlatten" title="Flatten open paper position">Flatten</button>
+                <button type="button" class="btn-pd btn-pd-auto" id="btnPaperAuto" aria-pressed="false" title="Auto-execute Fade/Surf triggers live during streaming">Auto-Pilot: OFF</button>
+                <button type="button" class="btn-pd btn-pd-csv" id="btnExportCsv" title="Download Trade Tape & Paper Desk fills as CSV">Export CSV</button>
+              </div>
             </div>
           </div>
 
@@ -627,9 +656,10 @@
                     <th class="sortable" data-rsort="vwapOu">OU VWAP <span class="sort-arrow"></span></th>
                     <th class="sortable" data-rsort="absZ">z-Score <span class="sort-arrow">&#9660;</span></th>
                     <th class="sortable" data-rsort="tauHalf">OU &tau;&#189; <span class="sort-arrow"></span></th>
-                    <th class="sortable" data-rsort="curvature">Curv C<sub>t</sub> <span class="sort-arrow"></span></th>
+                    <th class="sortable" data-rsort="curvature">Curv <span class="sort-arrow"></span></th>
                     <th class="sortable" data-rsort="vpin">VPIN <span class="sort-arrow"></span></th>
-                    <th class="center sortable" data-rsort="hurst">Hurst Regime <span class="sort-arrow"></span></th>
+                    <th class="center sortable" data-rsort="pTrend">P(Trend) <span class="sort-arrow"></span></th>
+                    <th class="center sortable" data-rsort="hurst">Hurst <span class="sort-arrow"></span></th>
                     <th class="center sortable" data-rsort="actionRank">Live Action <span class="sort-arrow"></span></th>
                     <th class="center">Lab</th>
                   </tr>
@@ -702,7 +732,7 @@
                     <th>OOS Ret%</th>
                     <th>Slip. Saved</th>
                     <th>PSR</th>
-                    <th>DSR (M=16)</th>
+                    <th id="wfDsrHeader">DSR (M=20)</th>
                     <th>OOS/IS</th>
                   </tr>
                 </thead>
@@ -713,26 +743,59 @@
         </div>
       </div>
 
-      <!-- Row 3: 4-Scenario Adversarial Microstructure Stress Matrix -->
-      <div class="card card-accent-top">
+      <!-- Row 3: 5-Scenario Adversarial Microstructure Stress Matrix -->
+      <div class="card card-accent-top" style="margin-bottom:12px;">
         <div class="card-header">
           <div class="card-title-group">
-            <h2 class="card-title">Table III. Adversarial Microstructure Stress Matrix</h2>
-            <span class="card-subtitle" id="stressMetaSubtitle">Unseen-seed hostile regime resilience · 20 sessions per stress scenario</span>
+            <h2 class="card-title">Table III. 5-Regime All-Weather Adversarial Stress Matrix</h2>
+            <span class="card-subtitle" id="stressMetaSubtitle">Unseen-seed hostile regimes · Dual-Regime Bayes turns Toxic Melt-Up positive</span>
           </div>
           <div class="chart-legend compact">
-            <span class="legend-item"><i class="swatch" style="background:#94B6DA;"></i>8m Single</span>
-            <span class="legend-item"><i class="swatch" style="background:#3B76C4;"></i>Adaptive (1&times;)</span>
-            <span class="legend-item"><i class="swatch" style="background:#1B4F9C;"></i>OU-VPIN (1&times;)</span>
-            <span class="legend-item"><i class="swatch" style="background:#0B1F3A;"></i>OU Turbo</span>
+            <span class="legend-item"><i class="swatch" style="background:#94B6DA;"></i>8m</span>
+            <span class="legend-item"><i class="swatch" style="background:#568BD0;"></i>Adapt 1&times;</span>
+            <span class="legend-item"><i class="swatch" style="background:#2A64B5;"></i>OU-VPIN</span>
+            <span class="legend-item"><i class="swatch" style="background:#134287;"></i>Dual 1&times;</span>
+            <span class="legend-item"><i class="swatch" style="background:#0B1F3A;"></i>Dual Turbo</span>
           </div>
         </div>
-        <div class="stress-grid" id="stressMatrixGrid"></div>
+        <div class="stress-grid stress-grid-5" id="stressMatrixGrid"></div>
+      </div>
+
+      <!-- Row 4: 1,000-Trial Block-Bootstrap 95% CIs & 8-Asset Portfolio Diversification -->
+      <div class="research-row-bot">
+        <!-- Left: Bootstrap 95% Sharpe Confidence Intervals & CVaR -->
+        <div class="card card-accent-top">
+          <div class="card-header">
+            <div class="card-title-group">
+              <h2 class="card-title">1,000-Trial Block-Bootstrap 95% Sharpe CIs &amp; Tail Risk</h2>
+              <span class="card-subtitle" id="bootMetaSubtitle">All-weather 120d · 95% CI, P(Loss) &amp; CVaR95</span>
+            </div>
+            <span class="dock-badge num" id="bootTrialBadge">B=1,000 · L=5d</span>
+          </div>
+          <div class="attr-chart-pad">
+            <svg id="bootstrapChart" class="chart-svg" viewBox="0 0 740 166" preserveAspectRatio="xMidYMid meet" role="img" aria-label="1000-trial block-bootstrap 95 percent Sharpe ratio confidence intervals"></svg>
+          </div>
+        </div>
+
+        <!-- Right: 8-Asset Intraday Portfolio Diversification -->
+        <div class="card card-accent-top">
+          <div class="card-header">
+            <div class="card-title-group">
+              <h2 class="card-title">8-Asset Intraday Portfolio Diversification</h2>
+              <span class="card-subtitle" id="portMetaSubtitle">60 sessions · Dual-Regime Bayes across ES–BTC-USD</span>
+            </div>
+            <span class="dock-badge num" id="portDivBadge">Div Ratio —</span>
+          </div>
+          <div class="portfolio-panel num" id="portfolioPanel">
+            <div class="port-kpi-row" id="portKpiRow"></div>
+            <div class="port-bars-wrap" id="portAssetBars"></div>
+          </div>
+        </div>
       </div>
     </section>
 
     <!-- =====================================================================
-         TAB 4: EDITORIAL BLUE SHEET PREVIEW (PAGE 1 / PAGE 2 SWITCHER)
+         TAB 4: EDITORIAL BLUE SHEET PREVIEW (PAGE 1 / PAGE 2 / PAGE 3 SWITCHER)
          ===================================================================== -->
     <section class="tab-panel" id="panel-sheet" role="tabpanel" aria-labelledby="tabBtnSheet">
       <div class="sheet-toolbar">
@@ -743,10 +806,13 @@
         <div class="sheet-actions">
           <div class="sheet-page-switcher" id="sheetPageSwitcher" role="group" aria-label="Editorial broadsheet page">
             <button type="button" class="sheet-page-btn active" data-page="1" data-src="blue_sheet.html">
-              Page 1 · Map of Blended 5–20m VWAP
+              Page 1 · Map
             </button>
             <button type="button" class="sheet-page-btn" data-page="2" data-src="research_brief.html">
-              Page 2 · OU-Spectral Research Brief
+              Page 2 · OU-Spectral
+            </button>
+            <button type="button" class="sheet-page-btn" data-page="3" data-src="dual_regime_brief.html">
+              Page 3 · Dual-Regime Bayes
             </button>
           </div>
           <a class="btn-secondary" id="btnOpenFullSheet" href="blue_sheet.html" target="_blank" rel="noopener">Open Full Sheet &#8599;</a>

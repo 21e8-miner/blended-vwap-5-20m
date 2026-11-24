@@ -9,6 +9,7 @@
   const SVG_NS = "http://www.w3.org/2000/svg";
 
   const PRESETS = {
+    dual_regime: { label: "Dual-Regime Bayes", short: "Dual-Regime", weights: [32, 34, 21, 13], dynamic: true },
     ou_spectral: { label: "OU-Spectral 5–20m", short: "OU-Spectral", weights: [32, 34, 21, 13], dynamic: true },
     adaptive:    { label: "Adaptive 5–20m",    short: "Adaptive",    weights: [35, 30, 20, 15], dynamic: true },
     static:      { label: "Static Blend",      short: "Static",      weights: [35, 30, 20, 15], dynamic: false },
@@ -73,8 +74,23 @@
     radarSortDir: "desc",
     radarRows: [],
     radarScanMs: 0,
-    // Tab 4 Editorial Blue Sheet page ("1" or "2")
+    // Tab 4 Editorial Blue Sheet page ("1", "2", or "3")
     sheetPage: "1",
+    // Live Paper-Trading Execution Desk state ($100,000 simulated account)
+    paper: {
+      startingEquity: 100000,
+      realizedUsd: 0,
+      qty: 0,
+      avgEntryPx: 0,
+      entryVwap: 0,
+      entryMode: "",
+      vwapEdgeSum: 0,
+      vwapEdgeCnt: 0,
+      realizedBpsSum: 0,
+      closedCount: 0,
+      fills: [],
+      autoPilot: false
+    },
     // Computed session data
     simSeries: null,
     simTrades: [],
@@ -703,6 +719,36 @@
 
       const toxicFlag = (vpin >= 0.56 && hurst >= 0.54) || hurst >= 0.62 || vpin >= 0.68;
 
+      // 5. Strictly Causal 2-State Hamilton Online Bayesian Regime Filter P(S_t = Trend | F_t)
+      const bullFanFull = b.close > b.vwap5 && b.vwap5 > b.vwap10 && b.vwap10 > b.vwap15 && b.vwap15 > b.vwap20;
+      const bearFanFull = b.close < b.vwap5 && b.vwap5 < b.vwap10 && b.vwap10 < b.vwap15 && b.vwap15 < b.vwap20;
+      const bullFanSoft = b.close > b.vwap5 && b.vwap5 > b.vwap10 && b.vwap10 > b.vwap20;
+      const bearFanSoft = b.close < b.vwap5 && b.vwap5 < b.vwap10 && b.vwap10 < b.vwap20;
+      const fanAlign = (bullFanFull || bearFanFull) ? 1.0 : ((bullFanSoft || bearFanSoft) ? 0.5 : 0.0);
+      const fanDir = (bullFanFull || bullFanSoft) ? 1 : ((bearFanFull || bearFanSoft) ? -1 : (b.vwap5 >= b.vwap20 ? 1 : -1));
+
+      let pTrend;
+      let regimeMode;
+      if (preserveEngineFields && Number.isFinite(Number(b.p_trend))) {
+        pTrend = clamp(Number(b.p_trend), 0.0, 1.0);
+        regimeMode = b.regime_mode || (pTrend < 0.38 ? "FADE" : (pTrend > 0.62 ? "SURF" : "FLAT"));
+      } else {
+        const pPrev = i === 0 ? 0.08 : Number(bars[i - 1].p_trend ?? 0.08);
+        // Markov transition step matching engine/dual_regime.py (p00 = 0.975, p11 = 0.945)
+        const pPred = pPrev * 0.945 + (1.0 - pPrev) * 0.025;
+        const llr = clamp(
+          (3.6 * (vpin - 0.46) +
+           5.4 * (hurst - 0.52) +
+           0.75 * (Math.abs(slope) - 1.05) +
+           1.45 * (fanAlign - 0.35) - 1.05) * 0.65,
+          -4.2,
+          4.2
+        );
+        const odds = (pPred / Math.max(1e-6, 1.0 - pPred)) * Math.exp(llr);
+        pTrend = clamp(odds / (1.0 + odds), 0.005, 0.995);
+        regimeMode = pTrend < 0.38 ? "FADE" : (pTrend > 0.62 ? "SURF" : "FLAT");
+      }
+
       b.tau_half = tauHalf;
       b.w5_ou = w5Ou;
       b.w10_ou = w10Ou;
@@ -717,6 +763,10 @@
       b.vpin = vpin;
       b.hurst = hurst;
       b.toxic_flag = toxicFlag;
+      b.p_trend = pTrend;
+      b.regime_mode = regimeMode;
+      b.fan_dir = fanDir;
+      b.fan_align = fanAlign;
     }
 
     return bars;
@@ -1132,13 +1182,31 @@
         else if (vp <= 0.42) vpinEl.classList.add("low");
       }
     }
+    const pTrendEl = $("telPTrend");
+    const pTrendPill = $("telPTrendPill");
+    if (pTrendEl && pTrendPill) {
+      const pt = Number(bar.p_trend);
+      const rm = bar.regime_mode || (pt < 0.38 ? "FADE" : (pt > 0.62 ? "SURF" : "FLAT"));
+      pTrendEl.textContent = Number.isFinite(pt) ? `${fmt(pt, 2)} ${rm}` : "—";
+      pTrendPill.classList.remove("fade", "flat", "surf");
+      pTrendPill.classList.add(rm.toLowerCase());
+    }
     if ($("telEngineMs")) $("telEngineMs").textContent = `${fmt(state.lastComputeMs, 2)} ms`;
 
     const sigEl = $("telSignalState");
     if (sigEl) {
       sigEl.classList.remove("long", "short");
+      const pt = Number(bar.p_trend ?? 0.2);
+      const isDualSurf = state.preset === "dual_regime" && pt > 0.62 && Number(bar.fan_align || 0) >= 0.5;
+      const isDualFlat = state.preset === "dual_regime" && pt >= 0.38 && pt <= 0.62;
       const isVetoed = state.preset === "ou_spectral" && Boolean(bar.toxic_flag) && Math.abs(z) >= state.entryZ;
-      if (isVetoed) {
+      if (isDualSurf) {
+        const dir = Number(bar.fan_dir || 1) >= 0 ? "LONG" : "SHORT";
+        sigEl.textContent = `SURF ${dir}`;
+        sigEl.classList.add(dir === "LONG" ? "long" : "short");
+      } else if (isDualFlat) {
+        sigEl.textContent = "BAYES FLAT ZONE";
+      } else if (isVetoed) {
         sigEl.textContent = "VETOED TOXIC";
         sigEl.classList.add("short");
       } else if (z <= -state.entryZ) {
@@ -1154,6 +1222,7 @@
         sigEl.textContent = "WATCHING";
       }
     }
+    updatePaperDeskUI();
   }
 
   function evaluateLiveTriggers(bar, vwapPx, zVal) {
@@ -1367,6 +1436,7 @@
     recomputeSession();
     const idx = RAW_SESSION.bars.length - 1;
     evaluateLiveTriggers(updated, state.simSeries.vwapBlend[idx], state.simSeries.zSeries[idx]);
+    evaluatePaperAutoPilot(updated, state.simSeries.vwapBlend[idx], state.simSeries.zSeries[idx]);
     scheduleLabRender();
     if (state.activeTab === "research") {
       runMultiAssetRadarScan();
@@ -1547,6 +1617,248 @@
     );
   }
 
+  /* ---------- Live Paper-Trading Execution Desk ($100,000 Account) ---------- */
+  function getPaperLiveContext() {
+    if (!RAW_SESSION || !RAW_SESSION.bars || !RAW_SESSION.bars.length || !state.simSeries) return null;
+    const idx = RAW_SESSION.bars.length - 1;
+    return {
+      bar: RAW_SESSION.bars[idx],
+      vwap: state.simSeries.vwapBlend[idx],
+      z: state.simSeries.zSeries[idx]
+    };
+  }
+
+  function updatePaperDeskUI() {
+    const p = state.paper;
+    const ctx = getPaperLiveContext();
+    const px = ctx ? Number(ctx.bar.close) : 0;
+    const unrealUsd = p.qty !== 0 && px > 0 ? p.qty * (px - p.avgEntryPx) : 0;
+    const unrealBps = p.qty !== 0 && p.avgEntryPx > 0
+      ? (p.qty > 0 ? 1 : -1) * ((px - p.avgEntryPx) / p.avgEntryPx) * 10000
+      : 0;
+    const equity = p.startingEquity + p.realizedUsd + unrealUsd;
+    const avgRealizedBps = p.closedCount > 0 ? p.realizedBpsSum / p.closedCount : 0;
+    const avgVwapEdge = p.vwapEdgeCnt > 0 ? p.vwapEdgeSum / p.vwapEdgeCnt : 0;
+
+    const posEl = $("pdPositionBadge");
+    if (posEl) {
+      posEl.classList.remove("flat", "long", "short");
+      if (Math.abs(p.qty) < 1e-8) {
+        posEl.textContent = "FLAT · 0 sh";
+        posEl.classList.add("flat");
+      } else {
+        const sideLbl = p.qty > 0 ? "LONG" : "SHORT";
+        const qStr = Math.abs(p.qty) >= 10 ? fmtInt(Math.abs(p.qty)) : fmt(Math.abs(p.qty), 3);
+        const modeTag = p.entryMode ? ` ${p.entryMode}` : "";
+        posEl.textContent = `${sideLbl}${modeTag} · ${qStr} ${state.symbol}`;
+        posEl.classList.add(p.qty > 0 ? "long" : "short");
+      }
+    }
+
+    if ($("pdEquity")) {
+      $("pdEquity").textContent = `$${equity.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+    }
+    const realEl = $("pdRealized");
+    if (realEl) {
+      realEl.textContent = `${p.realizedUsd >= 0 ? "+" : "-"}$${Math.abs(p.realizedUsd).toFixed(2)} (${fmtSigned(avgRealizedBps, 1)}bp)`;
+      realEl.classList.remove("pos", "neg");
+      if (p.realizedUsd > 0.005) realEl.classList.add("pos");
+      else if (p.realizedUsd < -0.005) realEl.classList.add("neg");
+    }
+    const unrEl = $("pdUnrealized");
+    if (unrEl) {
+      unrEl.textContent = `${unrealUsd >= 0 ? "+" : "-"}$${Math.abs(unrealUsd).toFixed(2)} (${fmtSigned(unrealBps, 1)}bp)`;
+      unrEl.classList.remove("pos", "neg");
+      if (unrealUsd > 0.005) unrEl.classList.add("pos");
+      else if (unrealUsd < -0.005) unrEl.classList.add("neg");
+    }
+    const vqEl = $("pdVwapQuality");
+    if (vqEl) {
+      vqEl.textContent = `${fmtSigned(avgVwapEdge, 2)} bp`;
+      vqEl.classList.remove("pos", "neg");
+      if (avgVwapEdge > 0.01) vqEl.classList.add("pos");
+      else if (avgVwapEdge < -0.01) vqEl.classList.add("neg");
+    }
+    if ($("pdFillCount")) $("pdFillCount").textContent = String(p.fills.length);
+
+    const autoBtn = $("btnPaperAuto");
+    if (autoBtn) {
+      autoBtn.classList.toggle("active", p.autoPilot);
+      autoBtn.setAttribute("aria-pressed", String(p.autoPilot));
+      autoBtn.textContent = p.autoPilot ? "Auto-Pilot: ON" : "Auto-Pilot: OFF";
+    }
+  }
+
+  function paperExecuteOrder(side, modeTag = "MANUAL") {
+    const ctx = getPaperLiveContext();
+    if (!ctx) return;
+    const p = state.paper;
+    const dir = side === "LONG" ? 1 : -1;
+    const halfSpreadFrac = (state.symbolSpreadBps * (state.turboMode ? 0.16 : 0.5)) / 10000;
+    const fillPx = ctx.bar.close * (1 + dir * halfSpreadFrac);
+    const targetNotional = state.turboMode ? 45000 : 25000;
+    const orderQty = fillPx >= 2000
+      ? Number((targetNotional / fillPx).toFixed(4))
+      : Math.max(1, Math.round(targetNotional / fillPx));
+
+    // If flipping an opposite position, realize PnL cleanly first
+    if (p.qty !== 0 && Math.sign(p.qty) !== dir) {
+      paperFlatten("FLIP");
+    }
+
+    const vwapEdgeBps = dir * ((ctx.vwap - fillPx) / Math.max(1e-6, fillPx)) * 10000;
+    const prevQty = p.qty;
+    const newQty = prevQty + dir * orderQty;
+    if (Math.abs(newQty) > 1e-8) {
+      p.avgEntryPx = (Math.abs(prevQty) * p.avgEntryPx + orderQty * fillPx) / Math.abs(newQty);
+    }
+    p.qty = newQty;
+    p.entryVwap = ctx.vwap;
+    p.entryMode = modeTag;
+    p.vwapEdgeSum += vwapEdgeBps;
+    p.vwapEdgeCnt += 1;
+
+    p.fills.unshift({
+      time: ctx.bar.time,
+      symbol: state.symbol,
+      side,
+      mode: modeTag,
+      qty: orderQty,
+      price: fillPx,
+      vwap: ctx.vwap,
+      edgeBps: vwapEdgeBps,
+      pnlUsd: 0,
+      pnlBps: 0
+    });
+    if (p.fills.length > 200) p.fills.pop();
+
+    updatePaperDeskUI();
+    showToast({
+      kind: side === "LONG" ? "long" : "short",
+      symbol: state.symbol,
+      label: `PAPER ${side} (${modeTag})`,
+      time: ctx.bar.time,
+      detail: `Filled ${orderQty} ${state.symbol} @ $${fmt(fillPx, fillPx >= 1000 ? 1 : 2)} · VWAP edge ${fmtSigned(vwapEdgeBps, 2)} bp`
+    });
+  }
+
+  function paperFlatten(reason = "FLATTEN") {
+    const p = state.paper;
+    if (Math.abs(p.qty) < 1e-8) return;
+    const ctx = getPaperLiveContext();
+    if (!ctx) return;
+
+    const closeDir = p.qty > 0 ? -1 : 1;
+    const halfSpreadFrac = (state.symbolSpreadBps * (state.turboMode ? 0.16 : 0.5)) / 10000;
+    const exitPx = ctx.bar.close * (1 + closeDir * halfSpreadFrac);
+    const pnlUsd = p.qty * (exitPx - p.avgEntryPx);
+    const posDir = p.qty > 0 ? 1 : -1;
+    const pnlBps = posDir * ((exitPx - p.avgEntryPx) / Math.max(1e-6, p.avgEntryPx)) * 10000;
+    const closedQty = Math.abs(p.qty);
+
+    p.realizedUsd += pnlUsd;
+    p.realizedBpsSum += pnlBps;
+    p.closedCount += 1;
+    p.fills.unshift({
+      time: ctx.bar.time,
+      symbol: state.symbol,
+      side: closeDir > 0 ? "BUY_CLOSE" : "SELL_CLOSE",
+      mode: reason,
+      qty: closedQty,
+      price: exitPx,
+      vwap: ctx.vwap,
+      edgeBps: closeDir * ((ctx.vwap - exitPx) / Math.max(1e-6, exitPx)) * 10000,
+      pnlUsd,
+      pnlBps
+    });
+    p.qty = 0;
+    p.avgEntryPx = 0;
+    p.entryMode = "";
+    updatePaperDeskUI();
+
+    if (reason !== "FLIP") {
+      showToast({
+        kind: "exit",
+        symbol: state.symbol,
+        label: `PAPER ${reason}`,
+        time: ctx.bar.time,
+        detail: `Closed ${closedQty} ${state.symbol} @ $${fmt(exitPx, exitPx >= 1000 ? 1 : 2)} · Net ${pnlUsd >= 0 ? "+" : "-"}$${Math.abs(pnlUsd).toFixed(2)} (${fmtSigned(pnlBps, 1)} bp)`
+      });
+    }
+  }
+
+  function evaluatePaperAutoPilot(bar, vwapPx, zVal) {
+    const p = state.paper;
+    if (!p.autoPilot) return;
+    const pt = Number(bar.p_trend ?? 0.2);
+
+    // Exit logic first
+    if (Math.abs(p.qty) > 1e-8) {
+      const isLong = p.qty > 0;
+      if (p.entryMode === "SURF") {
+        // Strict causal trailing 10m VWAP cross stop
+        if ((isLong && bar.close < bar.vwap10) || (!isLong && bar.close > bar.vwap10)) {
+          paperFlatten("SURF 10m STOP");
+        }
+      } else {
+        // Reversion to Blended VWAP
+        if ((isLong && zVal >= -0.20) || (!isLong && zVal <= 0.20)) {
+          paperFlatten("FADE REVERT");
+        }
+      }
+      return;
+    }
+
+    // Entry logic: Dual-Regime Bayes bifurcation (Fade < 0.38 | Flat | Surf > 0.62)
+    if (pt > 0.62 && Number(bar.fan_align || 0) >= 0.5) {
+      const side = Number(bar.fan_dir || 1) >= 0 ? "LONG" : "SHORT";
+      paperExecuteOrder(side, "SURF");
+    } else if (pt < 0.38) {
+      if (zVal <= -state.entryZ) paperExecuteOrder("LONG", "FADE");
+      else if (zVal >= state.entryZ) paperExecuteOrder("SHORT", "FADE");
+    }
+  }
+
+  function exportDeskCsv() {
+    const lines = [
+      "source,symbol,id,side,mode,entry_time,exit_time,hold_min,entry_px,exit_px,entry_z,gross_bps,cost_bps,net_bps,vwap_edge_bps"
+    ];
+    state.paper.fills.forEach((f, idx) => {
+      lines.push([
+        "PAPER_DESK", f.symbol, idx + 1, f.side, f.mode,
+        f.time, f.time, 0, f.price.toFixed(4), f.price.toFixed(4),
+        "0.00", f.pnlBps.toFixed(2), "0.00", f.pnlBps.toFixed(2), f.edgeBps.toFixed(2)
+      ].join(","));
+    });
+    state.simTrades.forEach(t => {
+      lines.push([
+        "SESSION_TAPE", state.symbol, t.id, t.side, t.mode || PRESETS[state.preset].short,
+        t.entryTime, t.exitTime, t.holdMin, t.entryPx.toFixed(4), t.exitPx.toFixed(4),
+        t.entryZ.toFixed(3), t.grossBps.toFixed(2), t.costBps.toFixed(2), t.netBps.toFixed(2), t.vwapEdge.toFixed(2)
+      ].join(","));
+    });
+
+    const csvText = lines.join("\n");
+    try {
+      const blob = new Blob([csvText], { type: "text/csv;charset=utf-8;" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `blended_vwap_${state.symbol.toLowerCase()}_tape.csv`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    } catch (_err) {}
+    showToast({
+      kind: "exit",
+      symbol: state.symbol,
+      label: "CSV EXPORTED",
+      time: "Now",
+      detail: `Exported ${state.paper.fills.length} paper fills + ${state.simTrades.length} session trades.`
+    });
+  }
+
   /* ---------- Causal Intraday Re-Calculation Engine ---------- */
   function getZoomBounds() {
     const bars = RAW_SESSION.bars;
@@ -1618,14 +1930,14 @@
 
     for (let i = 0; i < n; i++) {
       const b = bars[i];
-      if (state.preset === "ou_spectral") {
+      if (state.preset === "ou_spectral" || state.preset === "dual_regime") {
         vwapBlend[i] = Number(b.vwap_ou ?? b.vwap_adaptive);
         sigmaBlend[i] = Math.max(1e-6, Number(b.sigma_ou ?? b.sigma_blend));
         zSeries[i] = Number(b.z_ou ?? b.z_score);
-        w5Arr[i] = Number(b.w5_ou ?? b.w5);
-        w10Arr[i] = Number(b.w10_ou ?? b.w10);
-        w15Arr[i] = Number(b.w15_ou ?? b.w15);
-        w20Arr[i] = Number(b.w20_ou ?? b.w20);
+        w5Arr[i] = Number(b.w5_ou ?? b.ou_w5 ?? b.w5);
+        w10Arr[i] = Number(b.w10_ou ?? b.ou_w10 ?? b.w10);
+        w15Arr[i] = Number(b.w15_ou ?? b.ou_w15 ?? b.w15);
+        w20Arr[i] = Number(b.w20_ou ?? b.ou_w20 ?? b.w20);
       } else if (state.preset === "adaptive") {
         vwapBlend[i] = Number(b.vwap_adaptive);
         sigmaBlend[i] = Math.max(1e-6, Number(b.sigma_blend));
@@ -1697,12 +2009,34 @@
       while (i < n - minHold - 1) {
         const z = zSeries[i];
         const b = bars[i];
-
-        // Multi-horizon alignment filter: when blended weights are balanced, require slope-stability
-        // so single-window whipsaws are naturally dampened.
         let side = null;
-        if (z <= -entryZ) side = "LONG";
-        else if (z >= entryZ) side = "SHORT";
+        let tradeMode = "";
+        let regimeSizeWeight = 1.0;
+
+        if (state.preset === "dual_regime") {
+          const pt = Number(b.p_trend ?? 0.2);
+          if (pt < 0.38) {
+            // FADE Mode: OU-Spectral mean reversion sized smoothly by (1 - p_trend)
+            if (z <= -entryZ) side = "LONG";
+            else if (z >= entryZ) side = "SHORT";
+            tradeMode = "FADE";
+            regimeSizeWeight = clamp(1.0 - pt, 0.55, 1.0);
+          } else if (pt > 0.62) {
+            // SURF Mode: follow aligned 5-20m institutional VWAP fan flow
+            const fDir = Number(b.fan_dir || 0);
+            const fAlign = Number(b.fan_align || 0);
+            const slp = Number(b.slope || 0);
+            if (fAlign >= 0.5 && fDir !== 0 && (fDir * slp >= 0.42) && (fDir * (b.close - b.vwap10) >= 0)) {
+              side = fDir > 0 ? "LONG" : "SHORT";
+              tradeMode = "SURF";
+              regimeSizeWeight = clamp(pt, 0.62, 1.0);
+            }
+          }
+          // 0.38 <= p_trend <= 0.62: Flat Veto Zone (side remains null)
+        } else {
+          if (z <= -entryZ) side = "LONG";
+          else if (z >= entryZ) side = "SHORT";
+        }
 
         if (!side) {
           i += 1;
@@ -1714,20 +2048,21 @@
         const entryPx = b.close;
         const entryVwap = vwapBlend[i];
         const dislocBps = Math.abs(entryPx - entryVwap) / entryPx * 10000;
-        if (dislocBps < 6.5) {
+        if (tradeMode !== "SURF" && dislocBps < 6.5) {
           i += 1;
           continue;
         }
 
-        // OU-Spectral Curvature-VPIN Gate: 4-horizon consensus, curvature deceleration & VPIN+Hurst toxic-trend veto
-        if (state.preset === "ou_spectral") {
+        // OU-Spectral / Dual-Regime FADE Curvature-VPIN consensus gate
+        if (state.preset === "ou_spectral" || (state.preset === "dual_regime" && tradeMode === "FADE")) {
           const agree4 = side === "LONG"
             ? (entryPx < b.vwap5 && entryPx < b.vwap10 && entryPx < b.vwap15 && entryPx < b.vwap20)
             : (entryPx > b.vwap5 && entryPx > b.vwap10 && entryPx > b.vwap15 && entryPx > b.vwap20);
           const slopeAbs = Math.abs(Number(b.slope || 0));
           const curvAgainst = (-dir) * Number(b.d_curvature || 0);
           const curvReject = curvAgainst > 0.55 && slopeAbs > 0.95;
-          if (!agree4 || slopeAbs > 1.48 || curvReject || Boolean(b.toxic_flag)) {
+          const veto = state.preset === "ou_spectral" ? Boolean(b.toxic_flag) : false;
+          if (!agree4 || slopeAbs > 1.48 || curvReject || veto) {
             i += 1;
             continue;
           }
@@ -1736,8 +2071,8 @@
         const entrySig = sigmaBlend[i];
         const initGap = Math.abs(entryVwap - entryPx);
         const targetMove = 0.72 * initGap;
-        const effMaxHold = state.preset === "ou_spectral"
-          ? clamp(Math.round(1.6 * Number(b.tau_half || 10)), minHold, maxHold)
+        const effMaxHold = (state.preset === "ou_spectral" || state.preset === "dual_regime")
+          ? (tradeMode === "SURF" ? maxHold : clamp(Math.round(1.6 * Number(b.tau_half || 10)), minHold, maxHold))
           : maxHold;
         let exitIdx = Math.min(n - 2, entryIdx + effMaxHold);
         let peakRev = 0;
@@ -1748,10 +2083,26 @@
           const pxMove = dir * (bars[t].close - entryPx);
           if (pxMove > peakRev) peakRev = pxMove;
 
-          if (state.turboMode) {
+          if (tradeMode === "SURF") {
+            // Strict causal trailing 10m VWAP cross stop + regime flip protection
+            if ((side === "LONG" && bars[t].close < bars[t].vwap10) ||
+                (side === "SHORT" && bars[t].close > bars[t].vwap10) ||
+                Number(bars[t].p_trend ?? 0.7) < 0.35) {
+              exitIdx = t;
+              break;
+            }
+            if (pxMove < -2.3 * entrySig) {
+              exitIdx = t;
+              break;
+            }
+          } else if (state.turboMode) {
             // Causal asymmetric trailing reversion lock (captures overshoot past Blended VWAP)
             if (pxMove >= targetMove) armedTrail = true;
             if (armedTrail && (pxMove <= 0.85 * peakRev || pxMove >= 1.32 * initGap)) {
+              exitIdx = t;
+              break;
+            }
+            if (pxMove < -2.9 * entrySig) {
               exitIdx = t;
               break;
             }
@@ -1761,11 +2112,10 @@
               exitIdx = t;
               break;
             }
-          }
-          // Stop-loss guard against strong trend breakout
-          if (pxMove < -2.9 * entrySig) {
-            exitIdx = t;
-            break;
+            if (pxMove < -2.9 * entrySig) {
+              exitIdx = t;
+              break;
+            }
           }
         }
 
@@ -1782,20 +2132,22 @@
           costBps = 0.32 * spreadBps + 0.84 * impactBps;
           const excessZ = Math.max(Math.abs(z) - entryZ, 0);
           const volScale = clamp(5.5 / Math.max(volBps, 2.5), 0.75, 1.35);
-          sizeMult = clamp((2.35 + 1.15 * excessZ + 0.22 * Math.max(relVol - 1.0, 0)) * volScale, 1.9, 3.9);
+          sizeMult = clamp((2.35 + 1.15 * excessZ + 0.22 * Math.max(relVol - 1.0, 0)) * volScale * regimeSizeWeight, 1.6, 3.9);
         } else {
           costBps = spreadBps + 2 * impactBps;
-          sizeMult = 1.0;
+          sizeMult = regimeSizeWeight;
         }
 
         const grossBps = rawGrossBps * sizeMult;
         const netBps = (rawGrossBps - costBps) * sizeMult;
-        // Slippage saved vs naive market execution relative to active Blended VWAP
-        const vwapEdge = dir * ((vwapBlend[entryIdx] - entryPx) / entryPx) * 10000 - costBps * 0.5;
+        const vwapEdge = tradeMode === "SURF"
+          ? (rawGrossBps * 0.35 - costBps * 0.5)
+          : (dir * ((vwapBlend[entryIdx] - entryPx) / entryPx) * 10000 - costBps * 0.5);
 
         trades.push({
           id: tid++,
           side,
+          mode: tradeMode,
           entryIdx,
           exitIdx,
           entryTime: bars[entryIdx].time,
@@ -1854,7 +2206,9 @@
     $("valW15").textContent = `${displayWeights[2]}%`;
     $("valW20").textContent = `${displayWeights[3]}%`;
 
-    $("weightSumBadge").textContent = state.preset === "ou_spectral" ? "OU Kernel 100%" : (isDynamicPreset ? "Dynamic 100%" : "100%");
+    $("weightSumBadge").textContent = state.preset === "dual_regime"
+      ? "Bayes OU 100%"
+      : (state.preset === "ou_spectral" ? "OU Kernel 100%" : (isDynamicPreset ? "Dynamic 100%" : "100%"));
     $("presetActiveLabel").textContent = PRESETS[state.preset].short;
     $("valEntryZ").textContent = `${state.entryZ.toFixed(2)}\u03C3`;
     $("valMaxHold").textContent = `${state.maxHold} min`;
@@ -1865,7 +2219,9 @@
       if (spans[idx]) spans[idx].style.width = `${w}%`;
     });
     $("kpiWeightText").textContent = `${displayWeights[0]} / ${displayWeights[1]} / ${displayWeights[2]} / ${displayWeights[3]}%`;
-    $("kpiWeightMode").textContent = state.preset === "ou_spectral" ? "OU-Spectral" : (isDynamicPreset ? "Dynamic" : "Fixed");
+    $("kpiWeightMode").textContent = state.preset === "dual_regime"
+      ? "Fade\u2194Surf"
+      : (state.preset === "ou_spectral" ? "OU-Spectral" : (isDynamicPreset ? "Dynamic" : "Fixed"));
   }
 
   function updateKPIStrip() {
@@ -1914,7 +2270,14 @@
       (RAW_METRICS && RAW_METRICS.configs && RAW_METRICS.configs[0]);
 
     const rlWf = RAW_METRICS && RAW_METRICS.research_lab && RAW_METRICS.research_lab.walk_forward_dsr;
-    if (state.preset === "ou_spectral" && state.symbol === "ES" && rlWf) {
+    const drLab = RAW_METRICS && RAW_METRICS.dual_regime_lab;
+    const drWf = drLab && drLab.walk_forward_dsr_m20;
+    if (state.preset === "dual_regime" && state.symbol === "ES" && drWf) {
+      const drRef = state.turboMode ? drWf.dual_regime_turbo : drWf.dual_regime_1x;
+      netSharpeDisp = drRef
+        ? `SR ${fmt(drRef.full_sharpe, 2)} (OOS ${fmt(drRef.oos_sharpe, 2)})`
+        : computeImpliedSharpe(allTrades);
+    } else if (state.preset === "ou_spectral" && state.symbol === "ES" && rlWf) {
       const ouRef = state.turboMode ? rlWf.ou_spectral_turbo : rlWf.ou_spectral_1x;
       netSharpeDisp = ouRef ? `SR ${fmt(ouRef.full_sharpe, 2)} (OOS ${fmt(ouRef.oos_sharpe, 2)})` : computeImpliedSharpe(allTrades);
     } else if (state.turboMode && state.symbol === "ES" && RAW_METRICS && RAW_METRICS.turbo_benchmark && state.preset === "adaptive") {
@@ -2227,27 +2590,30 @@
 
       for (const t of visibleTrades) {
         const isSel = state.selectedTradeIdx === t.id;
-        const color = t.side === "LONG" ? COLORS.long : COLORS.short;
+        const isSurf = t.mode === "SURF";
+        const color = isSurf ? COLORS.cobalt : (t.side === "LONG" ? COLORS.long : COLORS.short);
         const ex = xOf(clamp(t.entryIdx, start, end));
         const ey = yPrice(t.entryPx);
         const xx = xOf(clamp(t.exitIdx, start, end));
         const xy = yPrice(t.exitPx);
 
-        // Connecting trade path
+        // Connecting trade path (solid cobalt for SURF momentum fills, dashed for FADE)
         topGroup.appendChild(svgEl("line", {
           x1: ex, y1: ey, x2: xx, y2: xy,
-          stroke: color, "stroke-width": isSel ? 2.1 : 1.35,
-          "stroke-dasharray": isSel ? null : "3,2", opacity: isSel ? 1 : 0.85
+          stroke: color, "stroke-width": isSel ? 2.2 : (isSurf ? 1.75 : 1.35),
+          "stroke-dasharray": (isSel || isSurf) ? null : "3,2", opacity: isSel ? 1 : 0.88
         }));
 
-        // Entry marker triangle
+        // Entry marker: diamond for SURF mode, triangle for FADE/standard
         if (t.entryIdx >= start && t.entryIdx <= end) {
-          const r = isSel ? 6.2 : 4.8;
-          const triPts = t.side === "LONG"
-            ? `${ex},${ey - r - 1} ${ex - r},${ey + r - 1} ${ex + r},${ey + r - 1}`
-            : `${ex},${ey + r + 1} ${ex - r},${ey - r + 1} ${ex + r},${ey - r + 1}`;
+          const r = isSel ? 6.2 : 5.0;
+          const markerPts = isSurf
+            ? `${ex},${ey - r} ${ex + r},${ey} ${ex},${ey + r} ${ex - r},${ey}`
+            : (t.side === "LONG"
+              ? `${ex},${ey - r - 1} ${ex - r},${ey + r - 1} ${ex + r},${ey + r - 1}`
+              : `${ex},${ey + r + 1} ${ex - r},${ey - r + 1} ${ex + r},${ey - r + 1}`);
           const marker = svgEl("polygon", {
-            points: triPts, fill: color, stroke: "#FFFFFF", "stroke-width": 1.1,
+            points: markerPts, fill: color, stroke: "#FFFFFF", "stroke-width": 1.15,
             style: "cursor:pointer;"
           });
           marker.addEventListener("click", () => selectTrade(t.id));
@@ -2266,8 +2632,8 @@
 
           // Compact PnL badge with basic collision avoidance
           if (showBadges || isSel) {
-            const label = `${fmtSigned(t.netBps, 1)}bp`;
-            const bw = 46;
+            const label = isSurf ? `S ${fmtSigned(t.netBps, 1)}bp` : `${fmtSigned(t.netBps, 1)}bp`;
+            const bw = isSurf ? 54 : 46;
             const bh = 15;
             let bx = clamp(xx - bw / 2, padL + 4, padL + plotW - bw - 4);
             let by = t.side === "LONG" ? xy - bh - 9 : xy + 9;
@@ -2286,14 +2652,14 @@
             const gBadge = svgEl("g", { style: "cursor:pointer;" });
             gBadge.appendChild(svgEl("rect", {
               x: bx, y: by, width: bw, height: bh, rx: 3,
-              fill: t.netBps >= 0 ? COLORS.longBg : COLORS.shortBg,
-              stroke: t.netBps >= 0 ? "#8BC9C6" : "#DFB1B8",
-              "stroke-width": isSel ? 1.5 : 0.9
+              fill: isSurf ? COLORS.ice : (t.netBps >= 0 ? COLORS.longBg : COLORS.shortBg),
+              stroke: isSurf ? COLORS.cobalt : (t.netBps >= 0 ? "#8BC9C6" : "#DFB1B8"),
+              "stroke-width": isSel ? 1.5 : 0.95
             }));
             gBadge.appendChild(svgEl("text", {
               x: bx + bw / 2, y: by + 10.6, "text-anchor": "middle",
-              fill: t.netBps >= 0 ? COLORS.long : COLORS.short,
-              "font-size": 9.3, "font-weight": 700,
+              fill: isSurf ? COLORS.navy : (t.netBps >= 0 ? COLORS.long : COLORS.short),
+              "font-size": 9.2, "font-weight": 700,
               "font-family": "Segoe UI, sans-serif",
               "font-variant-numeric": "tabular-nums"
             }, label));
@@ -2448,6 +2814,7 @@
           <span class="tt-k">Blended z-Score</span><span class="tt-v">${fmtSigned(sim.zSeries[barIdx], 2)}&sigma;</span>
           <span class="tt-k">OU &tau;&#189; / Curv C<sub>t</sub></span><span class="tt-v">${fmt(b.tau_half, 1)}m / ${fmtSigned(b.curvature, 2)}</span>
           <span class="tt-k">VPIN / Hurst H&#770;</span><span class="tt-v">${fmt(b.vpin, 2)} / ${fmt(b.hurst, 2)}</span>
+          <span class="tt-k">Hamilton P(Trend)</span><span class="tt-v">${fmt(b.p_trend, 2)} (${b.regime_mode || "FADE"})</span>
           <span class="tt-k">Rel. Volume</span><span class="tt-v">${fmt(b.rel_vol, 2)}&times;</span>
         </div>
         <div class="tt-weights num">
@@ -2504,9 +2871,10 @@
     for (const t of list) {
       const tr = document.createElement("tr");
       if (state.selectedTradeIdx === t.id) tr.classList.add("selected-row");
+      const modePill = t.mode ? `<span class="mode-pill ${t.mode.toLowerCase()}">${t.mode}</span>` : "";
       tr.innerHTML = `
         <td class="center num">${t.id}</td>
-        <td class="center"><span class="side-pill ${t.side === "LONG" ? "long" : "short"}">${t.side}</span></td>
+        <td class="center"><span class="side-pill ${t.side === "LONG" ? "long" : "short"}">${t.side}</span>${modePill}</td>
         <td class="left num">${t.entryTime}</td>
         <td class="left num">${t.exitTime}</td>
         <td class="num">${t.holdMin}m</td>
@@ -3355,22 +3723,35 @@
       const vpin = Number(b.vpin ?? 0.35);
       const hurst = Number(b.hurst ?? 0.50);
       const toxic = Boolean(b.toxic_flag);
+      const pTrend = clamp(Number(b.p_trend ?? 0.18), 0, 1);
+      const regimeMode = b.regime_mode || (pTrend < 0.38 ? "FADE" : (pTrend > 0.62 ? "SURF" : "FLAT"));
+      const fanDir = Number(b.fan_dir ?? (b.vwap5 >= b.vwap20 ? 1 : -1));
+      const fanAlign = Number(b.fan_align ?? 0);
 
       let hurstCls = "neutral";
       let hurstLabel = "NEUTRAL";
       if (hurst < 0.48) {
         hurstCls = "reverting";
-        hurstLabel = "REVERTING";
+        hurstLabel = "REVERT";
       } else if (hurst > 0.56 || toxic) {
         hurstCls = "toxic";
-        hurstLabel = "TOXIC TREND";
+        hurstLabel = "TOXIC";
       }
 
       let actionCls = "watching";
       let actionLabel = "WATCHING";
       let actionRank = 1;
-      if (absZ >= state.entryZ) {
-        if (toxic) {
+      if (pTrend > 0.62 && fanAlign >= 0.5) {
+        if (fanDir >= 0) {
+          actionCls = "surf-long";
+          actionLabel = "SURF LONG";
+        } else {
+          actionCls = "surf-short";
+          actionLabel = "SURF SHORT";
+        }
+        actionRank = 5;
+      } else if (absZ >= state.entryZ) {
+        if (pTrend >= 0.38 || toxic) {
           actionCls = "vetoed";
           actionLabel = "VETOED TOXIC";
           actionRank = 3;
@@ -3383,10 +3764,11 @@
           actionLabel = "STRONG SHORT";
           actionRank = 4;
         }
-      } else if (toxic) {
+      } else if (toxic || pTrend >= 0.38) {
         actionCls = "vetoed";
-        actionLabel = "VETOED TOXIC";
-        actionRank = 2;
+        actionLabel = pTrend > 0.62 ? (fanDir >= 0 ? "SURF LONG" : "SURF SHORT") : "VETOED TOXIC";
+        if (pTrend > 0.62) actionCls = fanDir >= 0 ? "surf-long" : "surf-short";
+        actionRank = pTrend > 0.62 ? 4 : 2;
       }
 
       rows.push({
@@ -3400,6 +3782,8 @@
         slope,
         vpin,
         hurst,
+        pTrend,
+        regimeMode,
         toxic,
         hurstCls,
         hurstLabel,
@@ -3458,7 +3842,8 @@
         <td class="num">${fmt(r.tauHalf, 1)}m</td>
         <td class="num">${fmtSigned(r.curvature, 2)}</td>
         <td class="num"><span class="vpin-cell"><span>${fmt(r.vpin, 2)}</span><span class="vpin-bar"><i style="width:${vpinPct}%; background:${vpinColor};"></i></span></span></td>
-        <td class="center"><span class="hurst-pill ${r.hurstCls}">${fmt(r.hurst, 2)} · ${r.hurstLabel}</span></td>
+        <td class="center"><span class="ptrend-pill ${r.regimeMode.toLowerCase()}">${fmt(r.pTrend, 2)} ${r.regimeMode}</span></td>
+        <td class="center"><span class="hurst-pill ${r.hurstCls}">${fmt(r.hurst, 2)} ${r.hurstLabel}</span></td>
         <td class="center"><span class="action-pill ${r.actionCls}">${r.actionLabel}</span></td>
         <td class="center"><button type="button" class="btn-radar-inspect" data-inspect="${r.symbol}">Inspect &rarr;</button></td>
       `;
@@ -3496,6 +3881,7 @@
     const b = row.bar;
     const digits = b.close >= 1000 ? 1 : 2;
     if ($("tsCurveTitle")) $("tsCurveTitle").textContent = `5–20m VWAP Term-Structure · ${row.symbol}`;
+    if ($("tsCurveModeBadge")) $("tsCurveModeBadge").textContent = `P(Trend) ${fmt(row.pTrend, 2)} · ${row.regimeMode}`;
     if ($("tsFactorLevel")) $("tsFactorLevel").textContent = `$${fmt(row.vwapOu, digits)}`;
     if ($("tsFactorSlope")) $("tsFactorSlope").textContent = `${fmtSigned(row.slope, 2)}\u03C3`;
     if ($("tsFactorCurv")) $("tsFactorCurv").textContent = `${fmtSigned(row.curvature, 2)}\u03C3`;
@@ -3852,30 +4238,46 @@
     clearEl(tbody);
 
     const rl = RAW_METRICS && RAW_METRICS.research_lab;
-    const wf = rl && rl.walk_forward_dsr;
+    const dr = RAW_METRICS && RAW_METRICS.dual_regime_lab;
+    const wf = (dr && dr.walk_forward_dsr_m20 && Array.isArray(dr.walk_forward_dsr_m20.models))
+      ? dr.walk_forward_dsr_m20
+      : (rl && rl.walk_forward_dsr);
+
     if (!wf || !Array.isArray(wf.models)) {
       tbody.innerHTML = `<tr><td colspan="8" class="center" style="padding:18px; color:#526D8F;">Awaiting Purged Walk-Forward &amp; DSR benchmark in data/bundle.js…</td></tr>`;
       return;
     }
 
-    if (wf.split && $("wfMetaSubtitle")) {
+    const models = wf.models.slice();
+    const split = wf.split || (rl && rl.walk_forward_dsr && rl.walk_forward_dsr.split);
+    const mTrials = (split && split.trials_m) || 20;
+    const srStar = split ? (split.sr_benchmark_m20 ?? split.sr_benchmark_m16) : undefined;
+    if ($("wfDsrHeader")) $("wfDsrHeader").textContent = `DSR (M=${mTrials})`;
+    if (split && $("wfMetaSubtitle")) {
       $("wfMetaSubtitle").textContent =
-        `IS ${wf.split.is_sessions} vs OOS ${wf.split.oos_sessions} · Deflated Sharpe (M=${wf.split.trials_m}, SR*=${fmt(wf.split.sr_benchmark_m16, 2)})`;
-    }
-    const ou1x = wf.ou_spectral_1x;
-    if (ou1x && $("wfRetentionBadge")) {
-      $("wfRetentionBadge").textContent = `OU OOS SR ${fmt(ou1x.oos_sharpe, 2)} · DSR ${fmt(ou1x.dsr_pct, 2)}%`;
+        `IS ${split.is_sessions || "1–40"} vs OOS ${split.oos_sessions || "41–60"} · DSR (M=${mTrials}${srStar !== undefined ? `, SR*=${fmt(srStar, 2)}` : ""})`;
     }
 
-    for (const m of wf.models) {
+    const badgeRef = wf.dual_regime_1x || wf.ou_spectral_1x || models[models.length - 1];
+    if (badgeRef && $("wfRetentionBadge")) {
+      const dsrVal = badgeRef.dsr_m20_pct ?? badgeRef.dsr_pct;
+      const tag = /dual/i.test(badgeRef.id || badgeRef.name) ? "Dual 1\u00D7" : "OU 1\u00D7";
+      $("wfRetentionBadge").textContent = `${tag} OOS SR ${fmt(badgeRef.oos_sharpe, 2)} · DSR ${fmt(dsrVal, 2)}%`;
+    }
+
+    for (const m of models) {
       const tr = document.createElement("tr");
-      if (m.is_frontier) tr.classList.add("flagship-row");
+      const isDual = Boolean(m.is_dual_regime) || /dual/i.test(m.id || m.name);
       const isTurbo = /turbo/i.test(m.id || m.name);
-      const badge = m.is_frontier
-        ? `<span class="${isTurbo ? "flagship-badge" : "kpi-tag"}" style="margin-left:5px;">${isTurbo ? "TURBO" : "FRONTIER"}</span>`
-        : "";
-      const retCls = Number(m.oos_retention_pct) >= 85 ? "pnl-pos" : "";
-      const dsrCls = Number(m.dsr_pct) >= 75 ? "pnl-pos" : "";
+      if (isDual) tr.classList.add("flagship-row");
+      let badge = "";
+      if (isDual && isTurbo) badge = `<span class="flagship-badge" style="margin-left:5px;">ALL-WEATHER</span>`;
+      else if (isDual) badge = `<span class="kpi-tag" style="margin-left:5px; background:#DCEBFA; color:#0B1F3A;">BAYES</span>`;
+      else if (m.is_frontier || /ou_spectral/i.test(m.id || "")) badge = `<span class="kpi-tag" style="margin-left:5px;">${isTurbo ? "TURBO" : "OU-VPIN"}</span>`;
+
+      const dsrVal = Number(m.dsr_m20_pct ?? m.dsr_pct ?? 0);
+      const retCls = Number(m.oos_retention_pct) >= 100 ? "pnl-pos" : "";
+      const dsrCls = dsrVal >= 66 ? "pnl-pos" : "";
 
       tr.innerHTML = `
         <td class="left">${m.name}${badge}</td>
@@ -3884,7 +4286,7 @@
         <td class="num ${Number(m.oos_annual_return_pct) >= 0 ? "pnl-pos" : "pnl-neg"}">${fmtSigned(m.oos_annual_return_pct, 1)}%</td>
         <td class="num">${fmtSigned(m.vwap_slippage_saved_bps, 2)} bp</td>
         <td class="num">${fmt(m.psr_pct, 2)}%</td>
-        <td class="num ${dsrCls}">${fmt(m.dsr_pct, 2)}%</td>
+        <td class="num ${dsrCls}">${fmt(dsrVal, 2)}%</td>
         <td class="num ${retCls}">${fmt(m.oos_retention_pct, 1)}%</td>
       `;
       tbody.appendChild(tr);
@@ -3897,18 +4299,40 @@
     clearEl(grid);
 
     const rl = RAW_METRICS && RAW_METRICS.research_lab;
-    const scenarios = rl && Array.isArray(rl.stress_tests) ? rl.stress_tests : null;
+    const dr = RAW_METRICS && RAW_METRICS.dual_regime_lab;
+    const st5 = dr && dr.stress_tests_5;
+    const scenarios = (st5 && Array.isArray(st5.scenarios) && st5.scenarios.length > 0)
+      ? st5.scenarios
+      : (rl && Array.isArray(rl.stress_tests) ? rl.stress_tests : null);
+
     if (!scenarios || scenarios.length === 0) {
-      grid.innerHTML = `<div style="grid-column:1/-1; text-align:center; padding:18px; color:#526D8F; font-style:italic;">Awaiting 4-scenario adversarial stress suite in data/bundle.js…</div>`;
+      grid.innerHTML = `<div style="grid-column:1/-1; text-align:center; padding:18px; color:#526D8F; font-style:italic;">Awaiting 5-scenario adversarial stress suite in data/bundle.js…</div>`;
       return;
     }
 
-    const modelOrder = [
-      { key: "single_8m",        short: "8m Single",   color: "#94B6DA" },
-      { key: "adaptive_1x",      short: "Adaptive 1\u00D7", color: "#3B76C4" },
-      { key: "ou_spectral_1x",   short: "OU-VPIN 1\u00D7",  color: "#1B4F9C" },
-      { key: "ou_spectral_turbo", short: "OU Turbo",   color: "#0B1F3A" }
-    ];
+    if (st5 && st5.five_regime_mean && $("stressMetaSubtitle")) {
+      const fm = st5.five_regime_mean;
+      $("stressMetaSubtitle").textContent =
+        `5-Regime Mean: 8m ${fmtSigned(fm.single_8m, 2)} · Adapt ${fmtSigned(fm.adaptive_1x, 2)} · OU-Fade ${fmtSigned(fm.ou_spectral_1x, 2)} · Dual 1\u00D7 ${fmtSigned(fm.dual_regime_1x, 2)} (5/5 POS) · Dual Turbo ${fmtSigned(fm.dual_regime_turbo, 2)} (5/5 POS)`;
+    }
+
+    const hasDualModels = scenarios.some(sc => sc.models && sc.models.dual_regime_1x);
+    grid.classList.toggle("stress-grid-5", scenarios.length >= 5);
+
+    const modelOrder = hasDualModels
+      ? [
+          { key: "single_8m",         short: "8m Single",  color: "#94B6DA" },
+          { key: "adaptive_1x",       short: "Adapt 1\u00D7", color: "#568BD0" },
+          { key: "ou_spectral_1x",    short: "OU-VPIN",    color: "#2A64B5" },
+          { key: "dual_regime_1x",    short: "Dual 1\u00D7", color: "#134287" },
+          { key: "dual_regime_turbo", short: "Dual Turbo", color: "#0B1F3A" }
+        ]
+      : [
+          { key: "single_8m",         short: "8m Single",  color: "#94B6DA" },
+          { key: "adaptive_1x",       short: "Adapt 1\u00D7", color: "#3B76C4" },
+          { key: "ou_spectral_1x",    short: "OU-VPIN 1\u00D7", color: "#1B4F9C" },
+          { key: "ou_spectral_turbo", short: "OU Turbo",   color: "#0B1F3A" }
+        ];
 
     for (const sc of scenarios) {
       const modelsObj = sc.models || {};
@@ -3916,7 +4340,7 @@
       const maxAbsSr = Math.max(2.0, ...sharpes);
 
       const card = document.createElement("div");
-      card.className = `stress-card${sc.id === "momentum_meltup" ? " stress-toxic" : ""}`;
+      card.className = `stress-card${(sc.id === "momentum_meltup" || sc.id === "whipsaw_flip") ? " stress-toxic" : ""}`;
 
       const barsHtml = modelOrder.map(m => {
         const d = modelsObj[m.key] || { net_sharpe: 0, max_drawdown_pct: 0 };
@@ -3934,20 +4358,220 @@
         `;
       }).join("");
 
+      const footLeft = sc.mean_p_trend !== undefined
+        ? `P(T) <strong>${fmt(sc.mean_p_trend, 2)}</strong> · Surf <strong>${fmt(sc.surf_bar_pct, 0)}%</strong>`
+        : `VPIN <strong>${fmt(sc.vpin_mean, 2)}</strong> · H&#770; <strong>${fmt(sc.hurst_mean, 2)}</strong>`;
+      const footRight = sc.dual_fade_trades !== undefined
+        ? `F/S <strong>${sc.dual_fade_trades}/${sc.dual_surf_trades}</strong>`
+        : `<strong>${fmtInt(sc.toxic_vetoes)}</strong> vetoes`;
+
       card.innerHTML = `
         <div class="stress-head">
           <span class="stress-title">${sc.label}</span>
-          <span class="stress-shock-tag num">seed ${sc.seed}</span>
+          <span class="stress-shock-tag num">s${sc.seed}</span>
         </div>
         <div class="stress-desc">${sc.description}</div>
         <div class="stress-bars">${barsHtml}</div>
         <div class="stress-foot num">
-          <span>VPIN <strong>${fmt(sc.vpin_mean, 2)}</strong> · H&#770; <strong>${fmt(sc.hurst_mean, 2)}</strong></span>
-          <span><strong>${fmtInt(sc.toxic_vetoes)}</strong> toxic vetoes</span>
+          <span>${footLeft}</span>
+          <span>${footRight}</span>
         </div>
       `;
       grid.appendChild(card);
     }
+  }
+
+  function renderBootstrapChart() {
+    const svg = $("bootstrapChart");
+    if (!svg) return;
+    clearEl(svg);
+
+    const dr = RAW_METRICS && RAW_METRICS.dual_regime_lab;
+    const boot = dr && dr.bootstrap_ci;
+    const aw = boot && boot.all_weather_120d;
+    if (!aw || typeof aw !== "object") {
+      svg.appendChild(svgEl("text", {
+        x: 370, y: 86, "text-anchor": "middle",
+        fill: COLORS.muted, "font-size": 11, "font-style": "italic", "font-family": "Georgia, serif"
+      }, "Awaiting 1,000-trial Block-Bootstrap 95% Sharpe CIs in data/bundle.js…"));
+      return;
+    }
+
+    if ($("bootTrialBadge")) {
+      $("bootTrialBadge").textContent = `B=${fmtInt(boot.n_trials || 1000)} · L=${boot.block_len_sessions || 5}d · 120d`;
+    }
+
+    const order = [
+      { key: "single_8m",         label: "8m Elastic Fade",  isDual: false },
+      { key: "adaptive_1x",       label: "Adaptive Blend 1\u00D7", isDual: false },
+      { key: "ou_spectral_1x",    label: "OU-VPIN Fade 1\u00D7",   isDual: false },
+      { key: "dual_regime_1x",    label: "Dual-Regime 1\u00D7",    isDual: true  },
+      { key: "dual_regime_turbo", label: "Dual-Regime Turbo", isDual: true  }
+    ];
+    const items = order.filter(o => aw[o.key]).map(o => ({ ...o, ...aw[o.key] }));
+
+    const W = 740;
+    const H = 166;
+    const padL = 128;
+    const padR = 176;
+    const padT = 18;
+    const padB = 22;
+    const plotW = W - padL - padR;
+    const plotH = H - padT - padB;
+
+    const allVals = [0];
+    items.forEach(it => allVals.push(Number(it.ci95_lo), Number(it.ci95_hi), Number(it.median_sharpe)));
+    const xMin = Math.floor(Math.min(...allVals) - 0.8);
+    const xMax = Math.ceil(Math.max(...allVals) + 0.8);
+    const xOf = v => padL + ((v - xMin) / Math.max(1, xMax - xMin)) * plotW;
+
+    // Vertical gridlines & zero spine
+    const step = (xMax - xMin) > 16 ? 4 : 2;
+    for (let xv = Math.ceil(xMin / step) * step; xv <= xMax; xv += step) {
+      const x = xOf(xv);
+      svg.appendChild(svgEl("line", {
+        x1: x, y1: padT, x2: x, y2: padT + plotH,
+        stroke: xv === 0 ? COLORS.navy : COLORS.grid,
+        "stroke-width": xv === 0 ? 1.2 : 0.75,
+        "stroke-dasharray": xv === 0 ? "3,2" : "2,3"
+      }));
+      svg.appendChild(svgEl("text", {
+        x, y: H - 6, "text-anchor": "middle",
+        fill: xv === 0 ? COLORS.navy : COLORS.muted,
+        "font-size": 9.2, "font-weight": xv === 0 ? 700 : 400,
+        "font-family": "Segoe UI, sans-serif", "font-variant-numeric": "tabular-nums"
+      }, xv === 0 ? "0.0" : `${xv > 0 ? "+" : ""}${xv}`));
+    }
+
+    // Column headers for right-side readouts
+    svg.appendChild(svgEl("text", {
+      x: padL + plotW + 10, y: 12, fill: COLORS.muted,
+      "font-size": 8.6, "font-weight": 700, "font-family": "Segoe UI, sans-serif"
+    }, "95% SHARPE CI"));
+    svg.appendChild(svgEl("text", {
+      x: padL + plotW + 114, y: 12, "text-anchor": "end", fill: COLORS.muted,
+      "font-size": 8.6, "font-weight": 700, "font-family": "Segoe UI, sans-serif"
+    }, "P(LOSS)"));
+    svg.appendChild(svgEl("text", {
+      x: W - 4, y: 12, "text-anchor": "end", fill: COLORS.muted,
+      "font-size": 8.6, "font-weight": 700, "font-family": "Segoe UI, sans-serif"
+    }, "CVaR95"));
+
+    const rowH = plotH / Math.max(1, items.length);
+    items.forEach((it, idx) => {
+      const cy = padT + (idx + 0.5) * rowH;
+      const lo = Number(it.ci95_lo);
+      const med = Number(it.median_sharpe);
+      const hi = Number(it.ci95_hi);
+      const pLoss = Number(it.prob_loss_pct);
+      const cvar = Number(it.daily_cvar95_bps);
+
+      if (it.isDual) {
+        svg.appendChild(svgEl("rect", {
+          x: 2, y: cy - rowH / 2 + 1, width: W - 4, height: rowH - 2,
+          fill: COLORS.ice, rx: 3
+        }));
+      }
+
+      svg.appendChild(svgEl("text", {
+        x: padL - 8, y: cy + 3.4, "text-anchor": "end",
+        fill: it.isDual ? COLORS.navy : COLORS.ink,
+        "font-size": 9.8, "font-weight": it.isDual ? 700 : 500,
+        "font-family": "Segoe UI, sans-serif"
+      }, it.label));
+
+      const barColor = it.isDual ? COLORS.navy : (hi < 0 ? "#B85260" : COLORS.steel);
+      svg.appendChild(svgEl("line", {
+        x1: xOf(lo), y1: cy, x2: xOf(hi), y2: cy,
+        stroke: barColor, "stroke-width": it.isDual ? 2.6 : 1.9
+      }));
+      [lo, hi].forEach(ev => {
+        svg.appendChild(svgEl("line", {
+          x1: xOf(ev), y1: cy - 4.5, x2: xOf(ev), y2: cy + 4.5,
+          stroke: barColor, "stroke-width": 1.4
+        }));
+      });
+      svg.appendChild(svgEl("circle", {
+        cx: xOf(med), cy, r: it.isDual ? 4.4 : 3.5,
+        fill: it.isDual ? COLORS.navy : barColor,
+        stroke: "#FFFFFF", "stroke-width": 1.2
+      }));
+
+      svg.appendChild(svgEl("text", {
+        x: padL + plotW + 10, y: cy + 3.2,
+        fill: it.isDual ? COLORS.navy : COLORS.ink,
+        "font-size": 9.1, "font-weight": it.isDual ? 700 : 500,
+        "font-family": "Segoe UI, sans-serif", "font-variant-numeric": "tabular-nums"
+      }, `[${fmtSigned(lo, 2)}, ${fmtSigned(hi, 2)}]`));
+
+      svg.appendChild(svgEl("text", {
+        x: padL + plotW + 114, y: cy + 3.2, "text-anchor": "end",
+        fill: pLoss <= 1 ? COLORS.long : (pLoss >= 20 ? COLORS.short : COLORS.ink),
+        "font-size": 9.1, "font-weight": 700,
+        "font-family": "Segoe UI, sans-serif", "font-variant-numeric": "tabular-nums"
+      }, `${fmt(pLoss, 1)}%`));
+
+      svg.appendChild(svgEl("text", {
+        x: W - 4, y: cy + 3.2, "text-anchor": "end",
+        fill: COLORS.ink, "font-size": 9.1, "font-weight": 600,
+        "font-family": "Segoe UI, sans-serif", "font-variant-numeric": "tabular-nums"
+      }, `${fmt(cvar, 0)}bp`));
+    });
+  }
+
+  function renderPortfolioPanel() {
+    const kpiHost = $("portKpiRow");
+    const barsHost = $("portAssetBars");
+    if (!kpiHost || !barsHost) return;
+
+    const dr = RAW_METRICS && RAW_METRICS.dual_regime_lab;
+    const port = dr && dr.portfolio_8_asset;
+    const sum = port && port.summary;
+    if (!port || !sum) {
+      kpiHost.innerHTML = `<div style="grid-column:1/-1; text-align:center; padding:24px 8px; color:#526D8F; font-style:italic;">Awaiting 8-asset portfolio diversification metrics in data/bundle.js…</div>`;
+      barsHost.innerHTML = "";
+      return;
+    }
+
+    if ($("portDivBadge")) $("portDivBadge").textContent = `Div Ratio ${fmt(sum.diversification_ratio, 2)}\u00D7`;
+    if ($("portMetaSubtitle")) {
+      $("portMetaSubtitle").textContent =
+        `60d · \u03C1=${fmt(sum.avg_pairwise_corr, 3)} · Turbo RP ${fmt(sum.turbo_risk_parity_sharpe, 2)}`;
+    }
+
+    kpiHost.innerHTML = `
+      <div class="port-kpi-box">
+        <small>Single Avg SR</small>
+        <strong>${fmt(sum.single_asset_avg_sharpe, 2)}</strong>
+        <span>Avg MDD -${fmt(sum.single_asset_avg_mdd_pct, 2)}%</span>
+      </div>
+      <div class="port-kpi-box">
+        <small>Equal-Weight SR</small>
+        <strong>${fmt(sum.equal_weight_sharpe, 2)}</strong>
+        <span>MDD -${fmt(sum.equal_weight_mdd_pct, 2)}%</span>
+      </div>
+      <div class="port-kpi-box primary">
+        <small>Risk-Parity SR</small>
+        <strong>${fmt(sum.risk_parity_sharpe, 2)}</strong>
+        <span>MDD -${fmt(sum.risk_parity_mdd_pct, 2)}% · +${fmt(sum.sharpe_uplift_vs_single_pct, 0)}%</span>
+      </div>
+    `;
+
+    const assets = Array.isArray(port.assets) ? port.assets : [];
+    const maxSr = Math.max(4.0, ...assets.map(a => Math.abs(Number(a.net_sharpe || 0))));
+    barsHost.innerHTML = assets.map(a => {
+      const sr = Number(a.net_sharpe || 0);
+      const wPct = Number(a.risk_parity_weight_pct ?? 12.5);
+      const barW = clamp((Math.abs(sr) / maxSr) * 100, 5, 100);
+      const barColor = sr < 0 ? "#B85260" : (sr >= 3.5 ? COLORS.navy : COLORS.cobalt);
+      return `
+        <div class="port-asset-row">
+          <span class="port-sym">${a.symbol}</span>
+          <span class="port-track"><i style="width:${barW.toFixed(1)}%; background:${barColor};"></i></span>
+          <span class="port-meta ${sr < 0 ? "pnl-neg" : ""}">SR ${fmt(sr, 2)} · ${fmt(wPct, 1)}%</span>
+        </div>
+      `;
+    }).join("");
   }
 
   function renderResearchTab() {
@@ -3958,38 +4582,48 @@
     renderAlphaDecayChart();
     renderWalkForwardTable();
     renderStressMatrix();
+    renderBootstrapChart();
+    renderPortfolioPanel();
   }
 
-  /* ---------- Tab 4: Editorial Blue Sheet Page 1 / Page 2 Switcher ---------- */
+  /* ---------- Tab 4: Editorial Blue Sheet Page 1 / Page 2 / Page 3 Switcher ---------- */
   function switchSheetPage(pageNum) {
-    const p = String(pageNum) === "2" ? "2" : "1";
+    const raw = String(pageNum);
+    const p = raw === "3" ? "3" : (raw === "2" ? "2" : "1");
     state.sheetPage = p;
-    const src = p === "2" ? "research_brief.html" : "blue_sheet.html";
+    const srcMap = {
+      "1": "blue_sheet.html",
+      "2": "research_brief.html",
+      "3": "dual_regime_brief.html"
+    };
+    const titleMap = {
+      "1": "Publication Broadsheet — Map of Blended 5–20m VWAP (Page 1)",
+      "2": "Publication Broadsheet — Spectral VWAP: OU Half-Life, Curvature & Toxicity Gating (Page 2)",
+      "3": "Publication Broadsheet — Dual-Regime Spectral VWAP: Bayesian Bifurcation (Page 3)"
+    };
+    const subMap = {
+      "1": "Single-page Letter layout powered by identical quantitative bundle",
+      "2": "Companion IEEE Quant Blue research brief · Equations (3)–(4), Walk-Forward DSR & Stress Matrix",
+      "3": "Companion IEEE Quant Blue monograph · Hamilton Filter Eq. (5)–(6), 5-Regime Matrix & Bootstrap CIs"
+    };
+    const src = srcMap[p];
     const frame = $("blueSheetFrame");
     if (frame && frame.getAttribute("src") !== src) {
       frame.setAttribute("src", src);
     }
     const openLink = $("btnOpenFullSheet");
     if (openLink) openLink.setAttribute("href", src);
+    if ($("sheetToolbarTitle")) $("sheetToolbarTitle").textContent = titleMap[p];
+    if ($("sheetToolbarSub")) $("sheetToolbarSub").textContent = subMap[p];
 
-    if ($("sheetToolbarTitle")) {
-      $("sheetToolbarTitle").textContent = p === "2"
-        ? "Publication Broadsheet — Spectral VWAP: OU Half-Life, Curvature & Toxicity Gating (Page 2)"
-        : "Publication Broadsheet — Map of Blended 5–20m VWAP (Page 1)";
-    }
-    if ($("sheetToolbarSub")) {
-      $("sheetToolbarSub").textContent = p === "2"
-        ? "Companion IEEE Quant Blue research brief · Equations (3)–(4), Walk-Forward DSR & Stress Matrix"
-        : "Single-page Letter layout powered by identical quantitative bundle";
-    }
     document.querySelectorAll("#sheetPageSwitcher .sheet-page-btn").forEach(btn => {
       btn.classList.toggle("active", btn.dataset.page === p);
     });
     try {
       const url = new URL(window.location.href);
       if (state.activeTab === "sheet") {
-        if (p === "2") url.searchParams.set("page", "2");
-        else url.searchParams.delete("page");
+        if (p === "1") url.searchParams.delete("page");
+        else url.searchParams.set("page", p);
         window.history.replaceState({}, "", url.toString());
       }
     } catch (_err) {}
@@ -4052,10 +4686,12 @@
 
     $("btnQuickSheet").addEventListener("click", () => switchTab("sheet"));
 
-    // Print Blue Sheet button (prints active page 1 or page 2)
+    // Print Blue Sheet button (prints active page 1, 2, or 3)
     $("btnPrintSheet").addEventListener("click", () => {
       const frame = $("blueSheetFrame");
-      const activeSrc = state.sheetPage === "2" ? "research_brief.html" : "blue_sheet.html";
+      const activeSrc = state.sheetPage === "3"
+        ? "dual_regime_brief.html"
+        : (state.sheetPage === "2" ? "research_brief.html" : "blue_sheet.html");
       try {
         if (frame && frame.contentWindow) {
           frame.contentWindow.focus();
@@ -4067,6 +4703,35 @@
       }
       window.open(activeSrc, "_blank", "noopener");
     });
+
+    // Live Paper-Trading Execution Desk controls
+    const btnBuy = $("btnPaperBuy");
+    if (btnBuy) btnBuy.addEventListener("click", () => paperExecuteOrder("LONG", "MANUAL"));
+    const btnSell = $("btnPaperSell");
+    if (btnSell) btnSell.addEventListener("click", () => paperExecuteOrder("SHORT", "MANUAL"));
+    const btnFlat = $("btnPaperFlatten");
+    if (btnFlat) btnFlat.addEventListener("click", () => paperFlatten("FLATTEN"));
+    const btnAuto = $("btnPaperAuto");
+    if (btnAuto) {
+      btnAuto.addEventListener("click", () => {
+        state.paper.autoPilot = !state.paper.autoPilot;
+        updatePaperDeskUI();
+        if (state.paper.autoPilot && !state.rt.running) {
+          startLiveStream();
+        }
+        showToast({
+          kind: state.paper.autoPilot ? "long" : "exit",
+          symbol: state.symbol,
+          label: state.paper.autoPilot ? "AUTO-PILOT ENGAGED" : "AUTO-PILOT PAUSED",
+          time: "Now",
+          detail: state.paper.autoPilot
+            ? "Auto-executing causal Fade (<0.38) & Surf (>0.62) fills into $100,000 paper account."
+            : "Paper Auto-Pilot paused; existing position remains managed manually."
+        });
+      });
+    }
+    const btnCsv = $("btnExportCsv");
+    if (btnCsv) btnCsv.addEventListener("click", exportDeskCsv);
 
     // Editorial Blue Sheet Page 1 / Page 2 Switcher
     document.querySelectorAll("#sheetPageSwitcher .sheet-page-btn").forEach(btn => {
@@ -4342,8 +5007,8 @@
     if (turbo === "1" || turbo === "true") {
       state.turboMode = true;
     }
-    if (page === "2") {
-      state.sheetPage = "2";
+    if (page === "2" || page === "3") {
+      state.sheetPage = page;
     }
     return tab;
   }
