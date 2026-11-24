@@ -1,0 +1,1316 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>The Map of Blended 5–20m VWAP</title>
+  <style>
+    :root {
+      --navy: #0B1F3A;
+      --cobalt: #1B4F9C;
+      --steel: #3B76C4;
+      --cerulean: #68A3DF;
+      --ice: #EDF4FC;
+      --ice-soft: #F6FAFF;
+      --grid: #B8CEE8;
+      --slate: #3A5373;
+      --ink: #12243B;
+      --paper: #FFFFFF;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    html, body {
+      background: var(--paper);
+      color: var(--ink);
+      font-family: "Times New Roman", Cambria, Georgia, serif;
+      -webkit-font-smoothing: antialiased;
+      -webkit-print-color-adjust: exact;
+      print-color-adjust: exact;
+    }
+
+    body {
+      display: flex;
+      justify-content: center;
+      align-items: flex-start;
+      min-height: 100vh;
+    }
+
+    .sheet {
+      width: 1100px;
+      height: 1424px;
+      background: var(--paper);
+      padding: 32px 44px 30px 44px;
+      overflow: hidden;
+      position: relative;
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* Header */
+    .sheet-header {
+      text-align: center;
+      margin-bottom: 16px;
+    }
+
+    .sheet-title {
+      font-size: 41px;
+      font-weight: 700;
+      line-height: 1.08;
+      letter-spacing: -0.01em;
+      color: var(--navy);
+      margin-bottom: 7px;
+    }
+
+    .sheet-subtitle {
+      font-size: 16.5px;
+      font-style: italic;
+      font-weight: 400;
+      color: var(--slate);
+      line-height: 1.25;
+    }
+
+    /* Hero Figure */
+    .hero-figure {
+      width: 100%;
+      margin-bottom: 16px;
+    }
+
+    .hero-svg-wrap {
+      width: 100%;
+      line-height: 0;
+    }
+
+    #fig1-svg {
+      width: 100%;
+      height: auto;
+      display: block;
+      overflow: visible;
+    }
+
+    .fig-caption {
+      margin-top: 6px;
+      font-size: 12.8px;
+      line-height: 1.33;
+      color: var(--ink);
+      text-align: justify;
+      hyphens: auto;
+    }
+
+    .fig-caption .fig-label {
+      color: var(--navy);
+      font-weight: 700;
+    }
+
+    /* Two-column IEEE body */
+    .columns {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      column-gap: 30px;
+      align-items: start;
+      flex: 1 1 auto;
+    }
+
+    .col {
+      min-width: 0;
+    }
+
+    /* Abstract & Keywords */
+    .abstract {
+      font-size: 13.4px;
+      font-weight: 700;
+      line-height: 1.33;
+      color: var(--navy);
+      text-align: justify;
+      margin-bottom: 8px;
+    }
+
+    .abstract-lead,
+    .keywords-lead {
+      font-style: italic;
+      font-weight: 700;
+    }
+
+    .keywords {
+      font-size: 13.2px;
+      font-weight: 700;
+      font-style: italic;
+      line-height: 1.32;
+      color: var(--navy);
+      text-align: left;
+      margin-bottom: 12px;
+    }
+
+    /* Section & Subsection headings */
+    h2.sec-head {
+      text-align: center;
+      font-size: 14.2px;
+      font-weight: 700;
+      font-variant: small-caps;
+      letter-spacing: 0.04em;
+      color: var(--navy);
+      margin-top: 10px;
+      margin-bottom: 5px;
+      line-height: 1.2;
+    }
+
+    h3.sub-head {
+      font-size: 13.5px;
+      font-weight: 400;
+      font-style: italic;
+      color: var(--cobalt);
+      margin-top: 7px;
+      margin-bottom: 2px;
+      line-height: 1.25;
+    }
+
+    p.body-p {
+      font-size: 13.5px;
+      line-height: 1.35;
+      color: var(--ink);
+      text-align: justify;
+      text-indent: 1.25em;
+      margin-bottom: 5px;
+    }
+
+    p.body-p.no-indent {
+      text-indent: 0;
+    }
+
+    /* Publication-grade Math Equations */
+    .eq-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin: 9px 0 10px 0;
+      padding: 2px 0;
+    }
+
+    .eq-spacer {
+      width: 26px;
+      flex: 0 0 26px;
+    }
+
+    .eq-body {
+      flex: 1 1 auto;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-family: "Cambria Math", "Times New Roman", serif;
+      font-size: 18px;
+      color: var(--navy);
+      line-height: 1.1;
+      gap: 4px;
+    }
+
+    .eq-num {
+      width: 26px;
+      flex: 0 0 26px;
+      text-align: right;
+      font-family: "Times New Roman", serif;
+      font-size: 15px;
+      color: var(--cobalt);
+      font-weight: 400;
+    }
+
+    .m-it {
+      font-style: italic;
+    }
+
+    .m-rm {
+      font-style: normal;
+    }
+
+    .m-sub {
+      font-size: 0.66em;
+      vertical-align: -0.24em;
+      line-height: 0;
+    }
+
+    .m-sup {
+      font-size: 0.64em;
+      vertical-align: 0.44em;
+      line-height: 0;
+    }
+
+    .m-subsup {
+      display: inline-flex;
+      flex-direction: column;
+      align-items: flex-start;
+      justify-content: center;
+      line-height: 0.9;
+      margin-left: 1px;
+      vertical-align: middle;
+    }
+
+    .m-subsup .sup-t {
+      font-size: 0.56em;
+      font-style: normal;
+      margin-bottom: 2px;
+    }
+
+    .m-subsup .sub-t {
+      font-size: 0.60em;
+      font-style: italic;
+    }
+
+    .m-op {
+      display: inline-flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      line-height: 1;
+      margin: 0 3px;
+      vertical-align: middle;
+    }
+
+    .m-op .op-sym {
+      font-size: 1.48em;
+      line-height: 0.95;
+      font-style: normal;
+      display: block;
+    }
+
+    .m-op .op-bot {
+      font-size: 0.54em;
+      line-height: 1;
+      margin-top: 4px;
+      display: block;
+      white-space: nowrap;
+    }
+
+    .m-lim {
+      display: inline-flex;
+      flex-direction: column;
+      align-items: flex-start;
+      justify-content: center;
+      font-size: 0.54em;
+      line-height: 1.05;
+      vertical-align: middle;
+      margin: 0 3px 0 1px;
+    }
+
+    .m-frac {
+      display: inline-flex;
+      flex-direction: column;
+      align-items: center;
+      vertical-align: middle;
+      margin: 0 2px;
+      font-size: 0.88em;
+    }
+
+    .m-frac .m-num {
+      padding: 0 5px 3px 5px;
+      border-bottom: 1.25px solid var(--navy);
+      white-space: nowrap;
+      display: inline-flex;
+      align-items: center;
+    }
+
+    .m-frac .m-den {
+      padding: 3px 5px 0 5px;
+      white-space: nowrap;
+      display: inline-flex;
+      align-items: center;
+    }
+
+    .m-inline-sum {
+      font-size: 1.08em;
+      line-height: 1;
+    }
+
+    .m-comma-cond {
+      font-size: 0.72em;
+      color: var(--slate);
+      margin-left: -3px;
+      white-space: nowrap;
+    }
+
+    .eq2-body {
+      font-size: 21px;
+    }
+
+    .sqrt-wrap {
+      display: inline-flex;
+      align-items: center;
+      margin-left: 2px;
+    }
+
+    .sqrt-svg {
+      display: block;
+      height: 25px;
+      width: auto;
+    }
+
+    /* Booktabs Table I */
+    .table-wrap {
+      margin-bottom: 12px;
+    }
+
+    .table-title-num {
+      text-align: center;
+      font-size: 13px;
+      font-variant: small-caps;
+      letter-spacing: 0.06em;
+      color: var(--navy);
+      line-height: 1.22;
+    }
+
+    .table-title-cap {
+      text-align: center;
+      font-size: 12.2px;
+      font-variant: small-caps;
+      letter-spacing: 0.04em;
+      color: var(--slate);
+      margin-bottom: 6px;
+      line-height: 1.22;
+    }
+
+    table.booktabs {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 12.3px;
+      line-height: 1.32;
+      font-variant-numeric: tabular-nums;
+      color: var(--ink);
+    }
+
+    table.booktabs thead tr {
+      border-top: 1.8px solid var(--navy);
+      border-bottom: 0.9px solid var(--cobalt);
+    }
+
+    table.booktabs th {
+      padding: 4px 4px;
+      font-weight: 700;
+      color: var(--navy);
+      text-align: left;
+      white-space: nowrap;
+    }
+
+    table.booktabs th.num,
+    table.booktabs td.num {
+      text-align: right;
+    }
+
+    table.booktabs td {
+      padding: 2.8px 4px;
+      vertical-align: middle;
+      white-space: nowrap;
+    }
+
+    table.booktabs tbody tr.row-flagship {
+      background: var(--ice);
+      font-weight: 700;
+      color: var(--navy);
+    }
+
+    table.booktabs tbody tr.row-flagship td:first-child {
+      box-shadow: inset 2.5px 0 0 var(--cobalt);
+      padding-left: 6px;
+    }
+
+    table.booktabs tbody tr.row-blended td:first-child {
+      color: var(--cobalt);
+      font-weight: 700;
+    }
+
+    table.booktabs tbody tr.row-flagship td:first-child {
+      color: var(--navy);
+    }
+
+    table.booktabs tfoot tr {
+      border-top: 0.9px solid #7BA3D1;
+      border-bottom: 1.8px solid var(--navy);
+      font-weight: 700;
+      color: var(--navy);
+    }
+
+    table.booktabs tfoot td {
+      padding: 4px 4px;
+    }
+
+    .regime-tag {
+      color: var(--slate);
+      font-size: 11.7px;
+    }
+
+    tr.row-flagship .regime-tag {
+      color: var(--cobalt);
+    }
+
+    /* Section III + Aphorism */
+    .insights-block {
+      margin-top: 12px;
+    }
+
+    .aphorism {
+      margin-top: 16px;
+      text-align: center;
+      font-size: 13.8px;
+      font-style: italic;
+      line-height: 1.38;
+      color: var(--cobalt);
+      padding: 0 12px;
+    }
+
+    /* Status banner only if bundle missing */
+    .data-error {
+      border: 1.5px solid #B91C1C;
+      background: #FEF2F2;
+      color: #991B1B;
+      padding: 12px 16px;
+      font-size: 14px;
+      margin: 12px 0;
+      display: none;
+    }
+
+    /* Exact single-page US Letter print calibration */
+    @page {
+      size: 8.5in 11in;
+      margin: 0;
+    }
+
+    @media print {
+      html, body {
+        width: 8.5in;
+        height: 11in;
+        margin: 0;
+        padding: 0;
+        background: #FFFFFF;
+        overflow: hidden;
+      }
+
+      body {
+        display: block;
+      }
+
+      .sheet {
+        width: 1100px;
+        height: 1424px;
+        zoom: 0.7415;
+        margin: 0;
+        page-break-after: avoid;
+        break-after: avoid;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main class="sheet" id="sheet-root">
+    <header class="sheet-header">
+      <h1 class="sheet-title">The Map of Blended 5–20m VWAP</h1>
+      <p class="sheet-subtitle" id="sheet-subtitle">
+        Thirteen intraday execution windows spanning 5 to 20 minutes, mapped by holding regime and multi-horizon blend.
+      </p>
+    </header>
+
+    <div class="data-error" id="data-error">
+      Waiting for <code>../data/bundle.js</code> (<code>window.VWAP_DATA</code>). Run <code>engine/run_pipeline.py</code> first.
+    </div>
+
+    <figure class="hero-figure">
+      <div class="hero-svg-wrap">
+        <svg id="fig1-svg" viewBox="0 0 1012 456" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="The Map of Blended 5 to 20 minute VWAP configurations"></svg>
+      </div>
+      <figcaption class="fig-caption" id="fig1-caption">
+        <span class="fig-label">Fig. 1.</span> The map of blended 5–20m VWAP execution strategies.
+      </figcaption>
+    </figure>
+
+    <section class="columns">
+      <!-- LEFT COLUMN -->
+      <div class="col col-left">
+        <p class="abstract" id="abstract-text">
+          <span class="abstract-lead">Abstract—</span>Loading quantitative summary...
+        </p>
+
+        <p class="keywords">
+          <span class="keywords-lead">Keywords—</span>Blended VWAP, intraday execution, volume clock, multi-horizon consensus, Sharpe breadth, slippage.
+        </p>
+
+        <h2 class="sec-head">I. How to Read the Map</h2>
+        <p class="body-p" id="sec1-text">
+          Each circle represents one causal intraday execution strategy spanning 5 to 20 minutes.
+        </p>
+
+        <h2 class="sec-head">II. Two Equations Behind the Blend</h2>
+
+        <h3 class="sub-head">A. Multi-Horizon Blended VWAP</h3>
+        <p class="body-p">
+          At bar <span class="m-it">t</span>, the benchmark combines causal rolling VWAPs across horizons
+          <span class="m-it">h</span> &isin; {5, 10, 15, 20} min:
+        </p>
+
+        <div class="eq-row" aria-label="Equation 1: Multi-Horizon Blended VWAP">
+          <span class="eq-spacer"></span>
+          <div class="eq-body">
+            <span style="display:inline-flex;align-items:center;"><span class="m-rm">VWAP</span><span class="m-subsup"><span class="sup-t">blend</span><span class="sub-t">t</span></span></span>
+            <span>=</span>
+            <span class="m-op">
+              <span class="op-sym">&sum;</span>
+              <span class="op-bot"><span class="m-it">h</span>&isin;<span class="m-it">H</span></span>
+            </span>
+            <span><span class="m-it">w</span><span class="m-sub m-it">h</span>(<span class="m-it">t</span>)</span>
+            <span class="m-frac">
+              <span class="m-num">
+                <span class="m-inline-sum">&sum;</span><span class="m-lim"><span><span class="m-it">h</span>&minus;1</span><span><span class="m-it">j</span>=0</span></span>
+                <span><span class="m-it">P</span><span class="m-sub"><span class="m-it">t</span>&minus;<span class="m-it">j</span></span><span class="m-it">V</span><span class="m-sub"><span class="m-it">t</span>&minus;<span class="m-it">j</span></span></span>
+              </span>
+              <span class="m-den">
+                <span class="m-inline-sum">&sum;</span><span class="m-lim"><span><span class="m-it">h</span>&minus;1</span><span><span class="m-it">j</span>=0</span></span>
+                <span><span class="m-it">V</span><span class="m-sub"><span class="m-it">t</span>&minus;<span class="m-it">j</span></span></span>
+              </span>
+            </span>
+            <span class="m-comma-cond">,&ensp;&sum;<span class="m-it">w</span><span class="m-sub m-it">h</span>(<span class="m-it">t</span>)=1</span>
+          </div>
+          <span class="eq-num">(1)</span>
+        </div>
+
+        <p class="body-p no-indent" id="eq1-example">
+          Loading worked blend example...
+        </p>
+
+        <h3 class="sub-head">B. Breadth</h3>
+        <p class="body-p">
+          If each trade carries a small, independent edge with per-trade Sharpe ratio <span class="m-it">s</span>, then over <span class="m-it">N</span> annual trades:
+        </p>
+
+        <div class="eq-row" aria-label="Equation 2: Fundamental Law of Breadth">
+          <span class="eq-spacer"></span>
+          <div class="eq-body eq2-body">
+            <span><span class="m-it">SR</span><span class="m-sub m-it">N</span></span>
+            <span>=</span>
+            <span class="m-it">s</span>
+            <span class="sqrt-wrap">
+              <svg class="sqrt-svg" viewBox="0 0 38 26" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                <path d="M 1.5 14.5 L 5.2 12.8 L 10.2 23.2 L 16.5 3.2 L 36.5 3.2" fill="none" stroke="#0B1F3A" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+                <text x="26" y="21" text-anchor="middle" font-family="Cambria Math, Times New Roman, serif" font-style="italic" font-size="20" fill="#0B1F3A">N</text>
+              </svg>
+            </span>
+          </div>
+          <span class="eq-num">(2)</span>
+        </div>
+
+        <p class="body-p no-indent" id="eq2-example">
+          Loading worked breadth example...
+        </p>
+      </div>
+
+      <!-- RIGHT COLUMN -->
+      <div class="col col-right">
+        <div class="table-wrap">
+          <div class="table-title-num">TABLE I</div>
+          <div class="table-title-cap">The 5–20m VWAP Strategies on the Map</div>
+          <table class="booktabs" id="table1">
+            <thead>
+              <tr>
+                <th>Configuration</th>
+                <th>Regime</th>
+                <th class="num">Hold</th>
+                <th class="num">Slip. (bps)</th>
+                <th class="num">Net SR</th>
+              </tr>
+            </thead>
+            <tbody id="table1-body"></tbody>
+            <tfoot id="table1-foot"></tfoot>
+          </table>
+        </div>
+
+        <div class="insights-block">
+          <h2 class="sec-head">III. What the Map Teaches</h2>
+
+          <h3 class="sub-head" id="teach-a-head">A. Blended Consensus Leads on Risk-Adjusted Edge</h3>
+          <p class="body-p" id="teach-a-body">Loading insight A...</p>
+
+          <h3 class="sub-head" id="teach-b-head">B. Every Window Speed Has a Role</h3>
+          <p class="body-p" id="teach-b-body">Loading insight B...</p>
+
+          <h3 class="sub-head" id="teach-c-head">C. Volume-Clock Weighting Cuts Adverse Selection</h3>
+          <p class="body-p" id="teach-c-body">Loading insight C...</p>
+
+          <p class="aphorism">
+            Durable intraday execution alpha is built one basis point of<br />
+            slippage at a time, blended across the clock.
+          </p>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <script src="../data/bundle.js"></script>
+  <script>
+    (function () {
+      "use strict";
+
+      if (!window.VWAP_DATA || !window.VWAP_DATA.metrics) {
+        document.getElementById("data-error").style.display = "block";
+        return;
+      }
+
+      const data = window.VWAP_DATA;
+      const metrics = data.metrics;
+      const meta = metrics.meta || {};
+      const regimes = metrics.regimes || [];
+      const configs = (metrics.configs || []).slice().sort((a, b) => b.net_sharpe - a.net_sharpe);
+      const summary = metrics.summary || {};
+      const schedule = metrics.weight_schedule_intraday || [];
+
+      const SVG_NS = "http://www.w3.org/2000/svg";
+
+      function el(tag, attrs, text) {
+        const node = document.createElementNS(SVG_NS, tag);
+        if (attrs) {
+          for (const [k, v] of Object.entries(attrs)) {
+            node.setAttribute(k, String(v));
+          }
+        }
+        if (text !== undefined && text !== null) {
+          node.textContent = String(text);
+        }
+        return node;
+      }
+
+      function fmt(val, dec) {
+        return Number(val).toFixed(dec);
+      }
+
+      function fmtInt(val) {
+        return Math.round(Number(val)).toLocaleString("en-US");
+      }
+
+      const regimeById = {};
+      regimes.forEach((r) => {
+        regimeById[r.id] = r;
+      });
+
+      const flagship = configs.find((c) => c.is_flagship) || configs.find((c) => c.id === summary.flagship_id) || configs[0];
+      const bestSingle = configs.find((c) => c.id === summary.best_single_horizon_id) || configs.find((c) => !c.is_blended) || configs[1];
+      const blendedConfigs = configs.filter((c) => c.is_blended);
+      const microReg = regimeById.micro || regimes[0];
+      const coreReg = regimeById.core || regimes[1];
+      const anchorReg = regimeById.anchor || regimes[2];
+
+      // =========================================================================
+      // 1. RENDER FIG. 1 (BLUE STYLE EDITORIAL MAP)
+      // =========================================================================
+      function renderFig1() {
+        const svg = document.getElementById("fig1-svg");
+        while (svg.firstChild) svg.removeChild(svg.firstChild);
+
+        const W = 1012;
+        const H = 456;
+        const margin = { top: 10, right: 12, bottom: 34, left: 66 };
+        const plotW = W - margin.left - margin.right; // 934
+        const plotTop = margin.top;
+        const plotBot = H - margin.bottom; // 422
+        const plotH = plotBot - plotTop; // 412
+        const headerBandH = 44;
+        const dataTop = plotTop + headerBandH + 10;
+        const dataBot = plotBot;
+
+        // 3 Regime columns proportional to window structure (4 / 5 / 4 configs)
+        const colDefs = [
+          { id: "micro",  x0: margin.left,       x1: margin.left + 286,   shaded: false },
+          { id: "core",   x0: margin.left + 286, x1: margin.left + 660,   shaded: true  },
+          { id: "anchor", x0: margin.left + 660, x1: margin.left + plotW, shaded: false },
+        ];
+        const colById = {};
+        colDefs.forEach((c) => {
+          c.cx = (c.x0 + c.x1) / 2;
+          c.w = c.x1 - c.x0;
+          colById[c.id] = c;
+        });
+
+        // Clean editorial Y-axis domain with integer ticks (0.0 to 6.0, headroom to 6.45)
+        const sharpes = configs.map((c) => c.net_sharpe);
+        const maxS = Math.max(...sharpes);
+        const yMin = 0.0;
+        const step = maxS > 4.5 ? 1.0 : 0.5;
+        const yMax = Math.ceil((maxS + 0.45) / 0.5) * 0.5; // e.g. 6.5
+
+        function yScale(s) {
+          const frac = (s - yMin) / (yMax - yMin);
+          return dataBot - frac * (dataBot - dataTop);
+        }
+
+        // Circle radius scaled cleanly to annual_return_pct (area ~ return)
+        const rets = configs.map((c) => Math.max(0.5, c.annual_return_pct));
+        const minRVal = Math.min(...rets);
+        const maxRVal = Math.max(...rets);
+        function rScale(retPct) {
+          const val = Math.max(0.5, retPct);
+          if (maxRVal <= minRVal) return 15;
+          const t = (Math.sqrt(val) - Math.sqrt(minRVal)) / (Math.sqrt(maxRVal) - Math.sqrt(minRVal));
+          return 8.5 + t * 14.5; // 8.5px to 23px
+        }
+
+        // Background Ice Blue shading for Core Blended column
+        const coreCol = colById.core;
+        svg.appendChild(el("rect", {
+          x: coreCol.x0,
+          y: plotTop,
+          width: coreCol.w,
+          height: plotH,
+          fill: "#EDF4FC",
+        }));
+
+        // Horizontal dashed gridlines + Y ticks (zero duplicates!)
+        for (let v = yMin; v <= yMax + 1e-6; v += step) {
+          const tv = Math.round(v * 100) / 100;
+          const py = yScale(tv);
+          if (py < plotTop + headerBandH - 6) continue;
+          if (tv > yMin + 1e-6) {
+            svg.appendChild(el("line", {
+              x1: margin.left,
+              y1: py,
+              x2: margin.left + plotW,
+              y2: py,
+              stroke: "#B8CEE8",
+              "stroke-width": 0.95,
+              "stroke-dasharray": "2.8,3.2",
+            }));
+          }
+          svg.appendChild(el("text", {
+            x: margin.left - 8,
+            y: py + 4,
+            "text-anchor": "end",
+            "font-family": "Times New Roman, serif",
+            "font-size": 12.2,
+            fill: "#1E3554",
+          }, tv.toFixed(1)));
+        }
+
+        // Axes (Deep Quant Navy)
+        svg.appendChild(el("line", {
+          x1: margin.left,
+          y1: plotTop,
+          x2: margin.left,
+          y2: plotBot,
+          stroke: "#0B1F3A",
+          "stroke-width": 1.6,
+        }));
+        svg.appendChild(el("line", {
+          x1: margin.left,
+          y1: plotBot,
+          x2: margin.left + plotW,
+          y2: plotBot,
+          stroke: "#0B1F3A",
+          "stroke-width": 1.6,
+        }));
+
+        // Y-axis rotated label
+        const yLabelY = (plotTop + headerBandH + plotBot) / 2;
+        svg.appendChild(el("text", {
+          x: 16,
+          y: yLabelY,
+          transform: `rotate(-90 16 ${yLabelY})`,
+          "text-anchor": "middle",
+          "font-family": "Times New Roman, serif",
+          "font-style": "italic",
+          "font-size": 13.5,
+          fill: "#1E3554",
+        }, "Annualized Net Sharpe Ratio"));
+
+        // Column headers (Regime label + holding sublabel)
+        colDefs.forEach((col) => {
+          const r = regimeById[col.id] || { label: col.id, sublabel: "" };
+          svg.appendChild(el("text", {
+            x: col.cx,
+            y: plotTop + 17,
+            "text-anchor": "middle",
+            "font-family": "Times New Roman, serif",
+            "font-weight": "700",
+            "font-size": 14,
+            fill: "#0B1F3A",
+          }, r.label));
+          svg.appendChild(el("text", {
+            x: col.cx,
+            y: plotTop + 33,
+            "text-anchor": "middle",
+            "font-family": "Times New Roman, serif",
+            "font-style": "italic",
+            "font-size": 12.2,
+            fill: "#3A5373",
+          }, r.sublabel));
+        });
+
+        // Compute bubble coordinates per regime column preserving monotonic avg_hold_min order
+        // while giving the 3 Blended 5-20m models enough horizontal run for crisp visible dashed connectors
+        const nodes = [];
+        colDefs.forEach((col) => {
+          const group = configs
+            .filter((c) => c.regime === col.id)
+            .sort((a, b) => a.avg_hold_min - b.avg_hold_min);
+          if (!group.length) return;
+
+          const minH = Math.min(...group.map((c) => c.avg_hold_min));
+          const maxH = Math.max(...group.map((c) => c.avg_hold_min));
+          const padL = col.id === "anchor" ? 20 : 42;
+          const padR = col.id === "core" ? 96 : (col.id === "anchor" ? 44 : 104);
+          const usableW = Math.max(60, col.w - padL - padR);
+
+          group.forEach((cfg, idx) => {
+            const frac = maxH > minH
+              ? (cfg.avg_hold_min - minH) / (maxH - minH)
+              : (group.length > 1 ? idx / (group.length - 1) : 0.5);
+            const evenFrac = group.length > 1 ? idx / (group.length - 1) : 0.5;
+            // Blend true avg_hold_min with even rank so clustered bubbles showcase crisp spacing & connectors
+            const wHold = col.id === "core" ? 0.32 : (col.id === "anchor" ? 0.55 : 0.62);
+            const xFrac = wHold * frac + (1 - wHold) * evenFrac;
+            const cx = col.x0 + padL + xFrac * usableW;
+            const cy = yScale(cfg.net_sharpe);
+            const r = rScale(cfg.annual_return_pct);
+            nodes.push({ cfg, col, cx, cy, r });
+          });
+        });
+
+        // Horizontal separation pass so circles & flagship halo have generous visual air (and dashed connectors shine!)
+        for (let iter = 0; iter < 16; iter++) {
+          for (let i = 0; i < nodes.length; i++) {
+            for (let j = i + 1; j < nodes.length; j++) {
+              const a = nodes[i];
+              const b = nodes[j];
+              const dx = b.cx - a.cx;
+              const dy = b.cy - a.cy;
+              const dist = Math.hypot(dx, dy);
+              const extraGap = (a.cfg.is_blended && b.cfg.is_blended) ? 20 : 12;
+              const minDist = a.r + b.r + extraGap;
+              if (dist < minDist && a.col.id === b.col.id) {
+                const push = (minDist - dist) * 0.52;
+                const dir = dx >= 0 ? 1 : -1;
+                a.cx = Math.max(a.col.x0 + a.r + 18, Math.min(a.col.x1 - a.r - 18, a.cx - dir * push));
+                b.cx = Math.max(b.col.x0 + b.r + 18, Math.min(b.col.x1 - b.r - 18, b.cx + dir * push));
+              }
+            }
+          }
+        }
+
+        // Draw dashed family connectors for Blended 5-20m family
+        const blendedNodes = nodes
+          .filter((n) => n.cfg.is_blended)
+          .sort((a, b) => a.cfg.net_sharpe - b.cfg.net_sharpe);
+        const connectorSegments = [];
+        for (let i = 0; i < blendedNodes.length - 1; i++) {
+          const p1 = blendedNodes[i];
+          const p2 = blendedNodes[i + 1];
+          connectorSegments.push([p1.cx, p1.cy, p2.cx, p2.cy]);
+          svg.appendChild(el("line", {
+            x1: p1.cx,
+            y1: p1.cy,
+            x2: p2.cx,
+            y2: p2.cy,
+            stroke: "#1B4F9C",
+            "stroke-width": 1.4,
+            "stroke-dasharray": "4.5,3.5",
+            opacity: 0.85,
+          }));
+        }
+
+        // Draw circles (smaller/single first, blended/flagship on top)
+        const drawOrder = nodes.slice().sort((a, b) => {
+          const rank = (n) => (n.cfg.is_flagship ? 3 : n.cfg.is_blended ? 2 : 1);
+          return rank(a) - rank(b);
+        });
+
+        drawOrder.forEach((n) => {
+          let fill = "#3B76C4";
+          let stroke = "#1B4F9C";
+          let strokeW = 1.0;
+
+          if (n.cfg.is_flagship) {
+            fill = "#0B1F3A";
+            stroke = "#0B1F3A";
+            strokeW = 1.4;
+          } else if (n.cfg.is_blended) {
+            fill = "#1B4F9C";
+            stroke = "#0B1F3A";
+            strokeW = 1.1;
+          } else if (n.cfg.regime === "anchor") {
+            fill = "#68A3DF";
+            stroke = "#285EA4";
+            strokeW = 1.0;
+          } else if (n.cfg.regime === "micro") {
+            fill = "#3B76C4";
+            stroke = "#1B4F9C";
+            strokeW = 1.0;
+          } else {
+            fill = "#4A84CE";
+            stroke = "#1B4F9C";
+            strokeW = 1.0;
+          }
+
+          if (n.cfg.is_flagship) {
+            svg.appendChild(el("circle", {
+              cx: n.cx,
+              cy: n.cy,
+              r: n.r + 3.8,
+              fill: "none",
+              stroke: "#1B4F9C",
+              "stroke-width": 1.35,
+            }));
+          }
+
+          svg.appendChild(el("circle", {
+            cx: n.cx,
+            cy: n.cy,
+            r: n.r,
+            fill,
+            stroke,
+            "stroke-width": strokeW,
+          }));
+        });
+
+        // Legend box (top-right inside Anchor Drift plot area or clean bottom-right — check clear open water!)
+        const legendBox = { x0: margin.left + plotW - 178, y0: plotTop + headerBandH + 14, x1: margin.left + plotW - 6, y1: plotTop + headerBandH + 34 };
+        svg.appendChild(el("line", {
+          x1: legendBox.x0 + 4,
+          y1: legendBox.y0 + 10,
+          x2: legendBox.x0 + 36,
+          y2: legendBox.y0 + 10,
+          stroke: "#1B4F9C",
+          "stroke-width": 1.5,
+          "stroke-dasharray": "4.5,3.2",
+        }));
+        svg.appendChild(el("text", {
+          x: legendBox.x0 + 42,
+          y: legendBox.y0 + 14,
+          "font-family": "Times New Roman, serif",
+          "font-size": 11.8,
+          fill: "#1E3554",
+        }, "blended 5\u201320m family"));
+
+        // Smart collision-free 2-line label placement for all 13 circles
+        const placedBoxes = [
+          // Reserve legend box
+          { x0: legendBox.x0 - 6, y0: legendBox.y0 - 4, x1: legendBox.x1 + 4, y1: legendBox.y1 + 4 },
+        ];
+
+        function boxOverlapArea(a, b) {
+          const ox = Math.max(0, Math.min(a.x1, b.x1) - Math.max(a.x0, b.x0));
+          const oy = Math.max(0, Math.min(a.y1, b.y1) - Math.max(a.y0, b.y0));
+          return ox * oy;
+        }
+
+        function circleBoxOverlap(n, box) {
+          const pad = n.cfg.is_flagship ? 9 : 7;
+          const clx = Math.max(box.x0, Math.min(n.cx, box.x1));
+          const cly = Math.max(box.y0, Math.min(n.cy, box.y1));
+          const d = Math.hypot(n.cx - clx, n.cy - cly);
+          return d < (n.r + pad) ? (n.r + pad - d) : 0;
+        }
+
+        function segHitsBox(seg, box) {
+          const [x1, y1, x2, y2] = seg;
+          const steps = 16;
+          let hits = 0;
+          for (let s = 1; s < steps; s++) {
+            const t = s / steps;
+            const px = x1 + (x2 - x1) * t;
+            const py = y1 + (y2 - y1) * t;
+            if (px >= box.x0 - 2 && px <= box.x1 + 2 && py >= box.y0 - 2 && py <= box.y1 + 2) {
+              hits++;
+            }
+          }
+          return hits;
+        }
+
+        // Prioritize flagship & largest circles first for prime right-side labels
+        const labelOrder = nodes.slice().sort((a, b) => {
+          if (a.cfg.is_flagship !== b.cfg.is_flagship) return a.cfg.is_flagship ? -1 : 1;
+          return b.cfg.net_sharpe - a.cfg.net_sharpe;
+        });
+
+        labelOrder.forEach((n) => {
+          const labelName = n.cfg.short_label || n.cfg.name;
+          const line1Metric = `SR ${fmt(n.cfg.net_sharpe, 2)}`;
+          const line2Sub = `${fmt(n.cfg.avg_hold_min, 1)}m \u00b7 +${fmt(n.cfg.vwap_slippage_saved_bps, 2)} bps`;
+
+          // Conservative pixel width estimate for bold Times New Roman 11.5px + metric
+          const estW1 = (labelName.length + line1Metric.length + 2) * 6.3;
+          const estW2 = line2Sub.length * 5.25;
+          const boxW = Math.max(estW1, estW2) + 8;
+          const boxH = 26;
+          const gap = (n.cfg.is_flagship ? n.r + 8 : n.r + 5);
+
+          const candidates = [
+            // right-center (preferred editorial default)
+            { anchor: "start", x: n.cx + gap, y: n.cy - 2, pref: 0 },
+            // right-up
+            { anchor: "start", x: n.cx + gap, y: n.cy - 12, pref: 4 },
+            // right-down
+            { anchor: "start", x: n.cx + gap, y: n.cy + 8, pref: 5 },
+            // left-center
+            { anchor: "end", x: n.cx - gap, y: n.cy - 2, pref: 7 },
+            // left-up
+            { anchor: "end", x: n.cx - gap, y: n.cy - 12, pref: 10 },
+            // left-down
+            { anchor: "end", x: n.cx - gap, y: n.cy + 8, pref: 11 },
+            // above-center
+            { anchor: "middle", x: n.cx, y: n.cy - gap - 17, pref: 12 },
+            // below-center
+            { anchor: "middle", x: n.cx, y: n.cy + gap + 12, pref: 14 },
+            // above-right / above-left (great for low-Sharpe bubbles near the x-axis)
+            { anchor: "start", x: n.cx - 8, y: n.cy - gap - 17, pref: 15 },
+            { anchor: "end", x: n.cx + 8, y: n.cy - gap - 17, pref: 15 },
+            { anchor: "middle", x: n.cx + 12, y: n.cy - gap - 22, pref: 18 },
+            { anchor: "middle", x: n.cx - 12, y: n.cy - gap - 22, pref: 18 },
+            // shifted right-below / left-below
+            { anchor: "start", x: n.cx + gap * 0.7, y: n.cy + gap + 8, pref: 20 },
+            { anchor: "end", x: n.cx - gap * 0.7, y: n.cy + gap + 8, pref: 20 },
+          ];
+
+          let best = null;
+          let bestScore = Infinity;
+
+          candidates.forEach((cand) => {
+            let x0, x1;
+            if (cand.anchor === "start") {
+              x0 = cand.x;
+              x1 = cand.x + boxW;
+            } else if (cand.anchor === "end") {
+              x0 = cand.x - boxW;
+              x1 = cand.x;
+            } else {
+              x0 = cand.x - boxW / 2;
+              x1 = cand.x + boxW / 2;
+            }
+            const y0 = cand.y - 11;
+            const y1 = y0 + boxH;
+            const box = { x0, y0, x1, y1 };
+
+            let penalty = cand.pref;
+
+            // Hard walls: NEVER let any label clip outside plot boundaries or cross the x-axis / headers
+            if (x0 < margin.left + 4) penalty += 50000 + (margin.left + 4 - x0) * 200;
+            if (x1 > margin.left + plotW - 2) penalty += 50000 + (x1 - (margin.left + plotW - 2)) * 200;
+            if (y0 < plotTop + headerBandH + 2) penalty += 50000 + (plotTop + headerBandH + 2 - y0) * 200;
+            if (y1 > plotBot - 5) penalty += 60000 + (y1 - (plotBot - 5)) * 300;
+
+            // Slight preference to stay within own regime column
+            if (x0 < n.col.x0 - 2 || x1 > n.col.x1 + 2) {
+              penalty += 14;
+            }
+
+            // Hard avoidance of overlapping ANY circle
+            nodes.forEach((other) => {
+              const ov = circleBoxOverlap(other, box);
+              if (ov > 0) penalty += 25000 + ov * 400;
+            });
+
+            // Hard avoidance of overlapping ANY previously placed label or legend
+            placedBoxes.forEach((pb) => {
+              const area = boxOverlapArea(box, pb);
+              if (area > 0) penalty += 30000 + area * 20;
+            });
+
+            // Moderate penalty for crossing dashed connectors
+            connectorSegments.forEach((seg) => {
+              const hits = segHitsBox(seg, box);
+              if (hits > 0) penalty += 400 * hits;
+            });
+
+            if (penalty < bestScore) {
+              bestScore = penalty;
+              best = { cand, box };
+            }
+          });
+
+          placedBoxes.push({
+            x0: best.box.x0 - 3,
+            y0: best.box.y0 - 2,
+            x1: best.box.x1 + 3,
+            y1: best.box.y1 + 2,
+          });
+
+          const g = el("g", {});
+          const t1 = el("text", {
+            x: best.cand.x,
+            y: best.cand.y,
+            "text-anchor": best.cand.anchor,
+            "font-family": "Times New Roman, serif",
+            "font-size": n.cfg.is_flagship ? 12.1 : 11.4,
+            fill: n.cfg.is_flagship ? "#0B1F3A" : (n.cfg.is_blended ? "#0F3166" : "#12243B"),
+          });
+          t1.appendChild(el("tspan", { "font-weight": "700" }, labelName + " "));
+          t1.appendChild(el("tspan", { "font-weight": "400", fill: "#1B4F9C" }, line1Metric));
+          g.appendChild(t1);
+
+          g.appendChild(el("text", {
+            x: best.cand.x,
+            y: best.cand.y + 12.5,
+            "text-anchor": best.cand.anchor,
+            "font-family": "Times New Roman, serif",
+            "font-style": "italic",
+            "font-size": 10.6,
+            fill: "#3A5373",
+          }, line2Sub));
+
+          svg.appendChild(g);
+        });
+
+        // Regime summary totals directly beneath each column (exact 1-decimal return shares sum to 100.0%)
+        colDefs.forEach((col) => {
+          const r = regimeById[col.id];
+          if (!r) return;
+          const summaryTxt = el("text", {
+            x: col.cx,
+            y: plotBot + 22,
+            "text-anchor": "middle",
+            "font-family": "Times New Roman, serif",
+            "font-size": 12.2,
+            fill: "#12243B",
+          });
+          summaryTxt.appendChild(el("tspan", { "font-weight": "700", fill: "#0B1F3A" }, `SR ${fmt(r.avg_sharpe, 2)} avg`));
+          summaryTxt.appendChild(el("tspan", {}, `, ${fmt(r.return_share_pct, 1)}% return share, ${r.config_count} windows`));
+          svg.appendChild(summaryTxt);
+        });
+      }
+
+      // =========================================================================
+      // 2. RENDER TABLE I (BOOKTABS)
+      // =========================================================================
+      function renderTable1() {
+        const tbody = document.getElementById("table1-body");
+        const tfoot = document.getElementById("table1-foot");
+        tbody.innerHTML = "";
+        tfoot.innerHTML = "";
+
+        const shortRegime = {
+          micro: "Micro-Pulse",
+          core: "Core Blended",
+          anchor: "Anchor Drift",
+        };
+
+        configs.forEach((c) => {
+          const tr = document.createElement("tr");
+          if (c.is_flagship) tr.className = "row-flagship";
+          else if (c.is_blended) tr.className = "row-blended";
+
+          tr.innerHTML = `
+            <td>${c.name}</td>
+            <td class="regime-tag">${shortRegime[c.regime] || c.regime}</td>
+            <td class="num">${fmt(c.avg_hold_min, 1)}m</td>
+            <td class="num">+${fmt(c.vwap_slippage_saved_bps, 2)}</td>
+            <td class="num">${fmt(c.net_sharpe, 2)}</td>
+          `;
+          tbody.appendChild(tr);
+        });
+
+        // Summary footer row: Blended 5-20m family average vs overall median
+        const bAvgHold = blendedConfigs.reduce((s, c) => s + c.avg_hold_min, 0) / Math.max(1, blendedConfigs.length);
+        const bAvgSlip = blendedConfigs.reduce((s, c) => s + c.vwap_slippage_saved_bps, 0) / Math.max(1, blendedConfigs.length);
+        const bAvgSR = blendedConfigs.reduce((s, c) => s + c.net_sharpe, 0) / Math.max(1, blendedConfigs.length);
+
+        const footTr = document.createElement("tr");
+        footTr.innerHTML = `
+          <td>Blended 5\u201320m Avg (3)</td>
+          <td class="regime-tag">All-13 Med. SR ${fmt(summary.median_sharpe, 2)}</td>
+          <td class="num">${fmt(bAvgHold, 1)}m</td>
+          <td class="num">+${fmt(bAvgSlip, 2)}</td>
+          <td class="num">${fmt(bAvgSR, 2)}</td>
+        `;
+        tfoot.appendChild(footTr);
+      }
+
+      // =========================================================================
+      // 3. POPULATE DYNAMIC ACADEMIC PROSE & WORKED NUMERICAL EXAMPLES
+      // =========================================================================
+      function renderProse() {
+        const sessions = meta.sessions || 60;
+        const barsPerSession = meta.bars_per_session || 390;
+        const totalBars = meta.total_bars || sessions * barsPerSession;
+        const spreadBps = meta.spread_bps !== undefined ? fmt(meta.spread_bps, 1) : "0.6";
+        const horizonsStr = (meta.blend_horizons_min || [5, 10, 15, 20]).join(", ");
+
+        // Figure 1 Caption
+        document.getElementById("fig1-caption").innerHTML =
+          `<span class="fig-label">Fig. 1.</span> The map of blended 5&ndash;20m VWAP execution strategies across ` +
+          `${sessions} simulated U.S. equity sessions (${barsPerSession} one-minute bars/session, ${fmtInt(totalBars)} bars total, ` +
+          `${spreadBps} bps spread plus square-root market impact). Vertical position shows annualized net Sharpe ratio; ` +
+          `circle area scales with annualized net return. Dashed cobalt lines join the three multi-horizon 5&ndash;20m blended models ` +
+          `combining causal ${horizonsStr}-minute rolling VWAP benchmarks.`;
+
+        // Abstract
+        document.getElementById("abstract-text").innerHTML =
+          `<span class="abstract-lead">Abstract&mdash;</span>Thirteen causal intraday VWAP execution strategies spanning ` +
+          `5 to 20 minutes are evaluated across ${sessions} full trading sessions. Mapping them by holding regime shows ` +
+          `that the Core Blended regime (${coreReg.config_count} windows, 9&ndash;14 min) delivers an average net Sharpe of ` +
+          `${fmt(coreReg.avg_sharpe, 2)} and ${fmt(coreReg.return_share_pct, 1)}% of total annualized return share, ` +
+          `led by ${flagship.name} at ${fmt(flagship.net_sharpe, 2)} Sharpe (+${fmt(summary.sharpe_uplift_vs_best_single_pct, 1)}% ` +
+          `over the strongest single window, ${bestSingle.name}). Two equations explain how multi-horizon weighting and trade breadth convert small slippage savings into durable alpha.`;
+
+        // Section I
+        document.getElementById("sec1-text").innerHTML =
+          `Each circle is one causal 5&ndash;20 minute VWAP strategy, sized by annualized net return and placed vertically ` +
+          `by net Sharpe ratio across three holding regimes: fast Micro-Pulse fades (5&ndash;8 min), shaded Core Blended ` +
+          `windows (9&ndash;14 min), and slower Anchor Drift pullbacks (15&ndash;20 min). Dashed cobalt lines connect the ` +
+          `three blended models combining 5m, 10m, 15m, and 20m anchors; the ringed navy node marks the flagship adaptive blend.`;
+
+        // Equation (1) worked example using real intraday weight schedule + flagship compounding
+        let highVolPt = schedule[0];
+        let lowVolPt = schedule[0];
+        if (schedule.length) {
+          schedule.forEach((pt) => {
+            if (pt.rel_volume > highVolPt.rel_volume) highVolPt = pt;
+            if (pt.rel_volume < lowVolPt.rel_volume) lowVolPt = pt;
+          });
+        }
+        const openFastPct = highVolPt ? Math.round((highVolPt.w5 + highVolPt.w10) * 100) : 79;
+        const openSlowPct = highVolPt ? Math.round((highVolPt.w15 + highVolPt.w20) * 100) : 21;
+        const lullSlowPct = lowVolPt ? Math.round((lowVolPt.w15 + lowVolPt.w20) * 100) : 47;
+        const comp100 = summary.flagship_compounded_100_1yr || (100 * (1 + flagship.annual_return_pct / 100));
+
+        document.getElementById("eq1-example").innerHTML =
+          `At the open surge (${highVolPt ? highVolPt.time : "09:30"} ET, ${highVolPt ? fmt(highVolPt.rel_volume, 2) : "3.06"}&times; ` +
+          `relative volume), ${flagship.name} allocates ${openFastPct}% to 5m&ndash;10m anchors; during the midday lull ` +
+          `(${lowVolPt ? lowVolPt.time : "13:50"} ET), it lifts 15m&ndash;20m weight from ${openSlowPct}% to ${lullSlowPct}%, ` +
+          `saving +${fmt(flagship.vwap_slippage_saved_bps, 2)} bps/trade and growing $100 to $${fmt(comp100, 2)} over one year ` +
+          `(+${fmt(flagship.annual_return_pct, 1)}% net).`;
+
+        // Equation (2) worked breadth example using real flagship per_trade_sharpe_s & annual_trades
+        const sVal = flagship.per_trade_sharpe_s;
+        const nVal = flagship.annual_trades;
+        const sqrtN = Math.sqrt(nVal);
+        const impliedSR = sVal * sqrtN;
+
+        document.getElementById("eq2-example").innerHTML =
+          `For ${flagship.name}, a per-trade Sharpe of ${fmt(sVal, 4)} repeated across ${fmtInt(nVal)} annual trades ` +
+          `(${fmt(flagship.trades_per_day, 1)}/day, &radic;<span class="m-it">N</span> = ${fmt(sqrtN, 2)}) delivers an annualized ` +
+          `net Sharpe of ${fmt(sVal, 4)} &times; ${fmt(sqrtN, 2)} = ${fmt(impliedSR, 2)} after ${fmt(flagship.avg_cost_bps, 2)} bps ` +
+          `round-trip friction. Consensus blending preserves breadth while pruning single-window whipsaws.`;
+
+        // Section III (A, B, C)
+        document.getElementById("teach-a-body").innerHTML =
+          `The five Core Blended windows average ${fmt(coreReg.avg_sharpe, 2)} net Sharpe and +${fmt(coreReg.avg_slippage_saved_bps, 2)} bps ` +
+          `VWAP slippage saved, outperforming both Micro-Pulse (${fmt(microReg.avg_sharpe, 2)}) and Anchor Drift (${fmt(anchorReg.avg_sharpe, 2)}). ` +
+          `${flagship.name} lifts net Sharpe by +${fmt(summary.sharpe_uplift_vs_best_single_pct, 1)}% over ${bestSingle.name} (${fmt(bestSingle.net_sharpe, 2)}).`;
+
+        document.getElementById("teach-b-body").innerHTML =
+          `Micro-Pulse windows (5&ndash;8m) capture ${fmt(microReg.return_share_pct, 1)}% of aggregate return share through ` +
+          `rapid order-flow fades but absorb heavier turnover costs; Anchor Drift (15&ndash;20m, ${fmt(anchorReg.return_share_pct, 1)}% ` +
+          `share) trades slower institutional drift with lower friction and higher ADV capacity.`;
+
+        const staticCfg = configs.find((c) => c.id === "static_blend_5_20");
+        const volCfg = configs.find((c) => c.id === "vol_weighted_blend_5_20");
+        const ladderText = (staticCfg && volCfg)
+          ? `Stepping from Static Blend (${fmt(staticCfg.net_sharpe, 2)}) to Vol-Weighted (${fmt(volCfg.net_sharpe, 2)}) ` +
+            `and Adaptive Blend (${fmt(flagship.net_sharpe, 2)}) shows how matching horizon weight to the volume clock ` +
+            `lifts slippage saved from +${fmt(staticCfg.vwap_slippage_saved_bps, 2)} to +${fmt(flagship.vwap_slippage_saved_bps, 2)} bps/trade ` +
+            `while capping drawdown at ${fmt(flagship.max_drawdown_pct, 2)}%.`
+          : `Adapting 5&ndash;20m horizon weights to real-time volume bursts filters single-window whipsaws while capping ` +
+            `max drawdown at ${fmt(flagship.max_drawdown_pct, 2)}% across ${fmtInt(summary.total_annual_trades_all || 0)} combined annual trades.`;
+        document.getElementById("teach-c-body").innerHTML = ladderText;
+      }
+
+      renderFig1();
+      renderTable1();
+      renderProse();
+    })();
+  </script>
+</body>
+</html>
