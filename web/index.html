@@ -139,6 +139,42 @@
           </div>
 
           <div class="dock-body">
+            <!-- Symbol / Instrument Selector -->
+            <div class="dock-section">
+              <div class="dock-label-row">
+                <span class="dock-heading">Symbol / Feed</span>
+                <span class="dock-badge" id="symbolSourceBadge">60-Session Benchmark</span>
+              </div>
+              <form class="symbol-form" id="symbolForm">
+                <input
+                  type="text"
+                  id="symbolInput"
+                  class="symbol-input num"
+                  value="ES"
+                  placeholder="Ticker (NVDA, SPY, BTC)"
+                  maxlength="16"
+                  autocomplete="off"
+                  spellcheck="false"
+                  aria-label="Enter ticker symbol"
+                >
+                <button type="submit" class="btn-symbol-load" id="btnLoadSymbol">Load</button>
+                <label class="btn-csv-import" title="Import 1-minute OHLCV CSV (time,open,high,low,close,volume)">
+                  CSV
+                  <input type="file" id="csvFileInput" accept=".csv,.txt" hidden>
+                </label>
+              </form>
+              <div class="symbol-chips" id="symbolChips">
+                <button type="button" class="sym-chip active" data-symbol="ES">ES</button>
+                <button type="button" class="sym-chip" data-symbol="SPY">SPY</button>
+                <button type="button" class="sym-chip" data-symbol="QQQ">QQQ</button>
+                <button type="button" class="sym-chip" data-symbol="NVDA">NVDA</button>
+                <button type="button" class="sym-chip" data-symbol="AAPL">AAPL</button>
+                <button type="button" class="sym-chip" data-symbol="TSLA">TSLA</button>
+                <button type="button" class="sym-chip" data-symbol="MSFT">MSFT</button>
+                <button type="button" class="sym-chip" data-symbol="BTC-USD">BTC-USD</button>
+              </div>
+            </div>
+
             <!-- Mode Presets -->
             <div class="dock-section">
               <div class="dock-label-row">
@@ -280,7 +316,7 @@
           <div class="card card-accent-top">
             <div class="card-header">
               <div class="card-title-group">
-                <h2 class="card-title">Intraday 5–20m Blended VWAP</h2>
+                <h2 class="card-title" id="chartMainTitle">Intraday 5–20m Blended VWAP · ES</h2>
                 <span class="card-subtitle" id="chartWindowCaption">Representative Session · 1-min bars</span>
               </div>
               <div class="chart-legend compact">

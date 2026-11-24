@@ -35,6 +35,10 @@
 
   const state = {
     activeTab: "lab",
+    symbol: "ES",
+    symbolSource: "benchmark",
+    symbolSpreadBps: 0.6,
+    symbolImpactCoeff: 0.12,
     preset: "adaptive",
     weights: [35, 30, 20, 15],
     defaultEntryZ: 1.58,
@@ -61,6 +65,25 @@
 
   let RAW_METRICS = null;
   let RAW_SESSION = null;
+  let BENCHMARK_SESSION = null;
+
+  const SYMBOL_PROFILES = {
+    ES:       { name: "ES Composite", basePx: 149.2,  volBps: 4.4,  spreadBps: 0.60, impact: 0.12, baseVol: 48000, crypto: false },
+    SPY:      { name: "SPDR S&P 500", basePx: 594.5,  volBps: 3.6,  spreadBps: 0.35, impact: 0.08, baseVol: 145000, crypto: false },
+    QQQ:      { name: "Invesco QQQ",  basePx: 512.8,  volBps: 4.8,  spreadBps: 0.40, impact: 0.09, baseVol: 112000, crypto: false },
+    NVDA:     { name: "NVIDIA Corp",  basePx: 138.4,  volBps: 8.6,  spreadBps: 0.70, impact: 0.14, baseVol: 185000, crypto: false },
+    AAPL:     { name: "Apple Inc",    basePx: 232.6,  volBps: 4.9,  spreadBps: 0.45, impact: 0.10, baseVol: 120000, crypto: false },
+    TSLA:     { name: "Tesla Inc",    basePx: 342.0,  volBps: 10.4, spreadBps: 0.85, impact: 0.16, baseVol: 165000, crypto: false },
+    MSFT:     { name: "Microsoft",    basePx: 428.5,  volBps: 4.5,  spreadBps: 0.45, impact: 0.10, baseVol: 78000, crypto: false },
+    AMZN:     { name: "Amazon.com",   basePx: 206.4,  volBps: 5.8,  spreadBps: 0.50, impact: 0.11, baseVol: 95000, crypto: false },
+    META:     { name: "Meta Platforms", basePx: 588.0, volBps: 6.4, spreadBps: 0.60, impact: 0.12, baseVol: 54000, crypto: false },
+    AMD:      { name: "AMD Inc",      basePx: 144.2,  volBps: 8.2,  spreadBps: 0.75, impact: 0.14, baseVol: 98000, crypto: false },
+    IWM:      { name: "Russell 2000", basePx: 234.8,  volBps: 5.1,  spreadBps: 0.50, impact: 0.11, baseVol: 88000, crypto: false },
+    GLD:      { name: "SPDR Gold",    basePx: 244.0,  volBps: 3.1,  spreadBps: 0.45, impact: 0.09, baseVol: 42000, crypto: false },
+    "BTC-USD":{ name: "Bitcoin USD",  basePx: 94200,  volBps: 9.2,  spreadBps: 1.10, impact: 0.15, baseVol: 320,    crypto: true, cbPair: "BTC-USD" },
+    "ETH-USD":{ name: "Ethereum USD", basePx: 3340,   volBps: 10.8, spreadBps: 1.30, impact: 0.16, baseVol: 1850,   crypto: true, cbPair: "ETH-USD" },
+    "SOL-USD":{ name: "Solana USD",   basePx: 238.5,  volBps: 12.6, spreadBps: 1.60, impact: 0.18, baseVol: 14200,  crypto: true, cbPair: "SOL-USD" }
+  };
 
   /* ---------- Utilities ---------- */
   function $(id) { return document.getElementById(id); }
@@ -199,6 +222,436 @@
     };
   }
 
+  /* ---------- Multi-Symbol Causal Session Engine ---------- */
+  function hashSymbolSeed(str) {
+    let h = 2166136261 >>> 0;
+    for (let i = 0; i < str.length; i++) {
+      h ^= str.charCodeAt(i);
+      h = Math.imul(h, 16777619) >>> 0;
+    }
+    return h || 1337;
+  }
+
+  function mulberry32(seed) {
+    let a = seed >>> 0;
+    return function () {
+      a = (a + 0x6D2B79F5) >>> 0;
+      let t = Math.imul(a ^ (a >>> 15), 1 | a);
+      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+  }
+
+  function gaussianRng(rand) {
+    const u1 = Math.max(1e-9, rand());
+    const u2 = rand();
+    return Math.sqrt(-2.0 * Math.log(u1)) * Math.cos(2.0 * Math.PI * u2);
+  }
+
+  function normalizeSymbolInput(raw) {
+    const clean = String(raw || "").trim().toUpperCase().replace(/[^A-Z0-9.\-=/^]/g, "");
+    if (!clean) return "ES";
+    if (clean === "BTC" || clean === "BTCUSD" || clean === "BTCUSDT") return "BTC-USD";
+    if (clean === "ETH" || clean === "ETHUSD" || clean === "ETHUSDT") return "ETH-USD";
+    if (clean === "SOL" || clean === "SOLUSD" || clean === "SOLUSDT") return "SOL-USD";
+    return clean;
+  }
+
+  function getSymbolProfile(symbol) {
+    if (SYMBOL_PROFILES[symbol]) return SYMBOL_PROFILES[symbol];
+    const h = hashSymbolSeed(symbol);
+    const isCrypto = /-(USD|USDT|EUR)$/.test(symbol);
+    const basePx = isCrypto
+      ? Number((15 + (h % 450) * 1.37).toFixed(2))
+      : Number((28 + (h % 380) * 1.15).toFixed(2));
+    const volBps = Number((4.2 + ((h >>> 5) % 62) * 0.11).toFixed(2));
+    const spreadBps = Number((0.45 + ((h >>> 11) % 10) * 0.08).toFixed(2));
+    const impact = Number((0.10 + ((h >>> 15) % 8) * 0.01).toFixed(2));
+    const baseVol = Math.round(28000 + ((h >>> 8) % 120) * 1100);
+    return {
+      name: symbol,
+      basePx,
+      volBps,
+      spreadBps,
+      impact,
+      baseVol,
+      crypto: isCrypto,
+      cbPair: isCrypto ? symbol.replace(/USDT$/, "USD") : null
+    };
+  }
+
+  function formatMinuteET(idx) {
+    const totalMin = 9 * 60 + 30 + idx;
+    const hh = Math.floor(totalMin / 60);
+    const mm = totalMin % 60;
+    return `${String(hh).padStart(2, "0")}:${String(mm).padStart(2, "0")}`;
+  }
+
+  function generateCalibratedSymbolBars(symbol) {
+    const profile = getSymbolProfile(symbol);
+    const seed = hashSymbolSeed(symbol + "::5-20M-VWAP");
+    const rand = mulberry32(seed);
+    const n = 390;
+    const bars = new Array(n);
+
+    let fairPx = profile.basePx;
+    let tempImpact = 0;
+    let driftState = (rand() - 0.5) * 0.00018;
+    const baseSigma = profile.volBps / 10000;
+
+    // Schedule 9-12 institutional slicing bursts creating realistic 5-20m dislocations
+    const bursts = [];
+    for (let k = 0; k < 11; k++) {
+      const start = Math.floor(18 + (k * 31) + rand() * 16);
+      const len = 4 + Math.floor(rand() * 6);
+      const dir = rand() > 0.5 ? 1 : -1;
+      const amp = (1.8 + rand() * 1.7) * baseSigma;
+      bursts.push({ start, end: start + len, dir, amp });
+    }
+
+    for (let i = 0; i < n; i++) {
+      const u = i / (n - 1);
+      // U-shaped intraday volume clock (open surge -> midday lull -> close surge)
+      const uShape = 0.68 + 2.25 * Math.exp(-u / 0.11) + 1.65 * Math.exp(-(1 - u) / 0.12);
+      const volMult = Math.max(0.32, uShape * (0.78 + 0.44 * rand()));
+
+      let burstPush = 0;
+      let burstVolBoost = 1.0;
+      for (let b = 0; b < bursts.length; b++) {
+        if (i >= bursts[b].start && i <= bursts[b].end) {
+          burstPush += bursts[b].dir * bursts[b].amp;
+          burstVolBoost = Math.max(burstVolBoost, 1.85);
+        }
+      }
+
+      if (i % 45 === 0) {
+        driftState = 0.45 * driftState + (rand() - 0.5) * 0.00022;
+      }
+
+      const volRegime = 0.85 + 0.55 * Math.sqrt(Math.min(3.5, volMult));
+      const shock = gaussianRng(rand) * baseSigma * volRegime;
+      const openPx = i === 0 ? fairPx : bars[i - 1].close;
+
+      fairPx = fairPx * (1 + driftState + shock * 0.62);
+      // Temporary impact decays over ~8-14 minutes (classic 5-20m reversion half-life)
+      tempImpact = tempImpact * 0.84 + burstPush + shock * 0.55;
+      const closePx = Math.max(profile.basePx * 0.5, fairPx * (1 + tempImpact));
+
+      const wickAmp = Math.abs(gaussianRng(rand)) * baseSigma * volRegime * 0.85;
+      const hiPx = Math.max(openPx, closePx) * (1 + wickAmp);
+      const loPx = Math.min(openPx, closePx) * (1 - wickAmp);
+      const volume = Math.max(10, Math.round(profile.baseVol * volMult * burstVolBoost));
+
+      bars[i] = {
+        idx: i,
+        time: formatMinuteET(i),
+        open: Number(openPx.toFixed(4)),
+        high: Number(hiPx.toFixed(4)),
+        low: Number(loPx.toFixed(4)),
+        close: Number(closePx.toFixed(4)),
+        volume
+      };
+    }
+
+    return { bars, profile };
+  }
+
+  async function tryFetchLiveCryptoBars(symbol, profile) {
+    if (!profile.crypto || !profile.cbPair || typeof fetch !== "function") return null;
+    const controller = typeof AbortController !== "undefined" ? new AbortController() : null;
+    const timer = controller ? setTimeout(() => controller.abort(), 2800) : null;
+    try {
+      const url = `https://api.exchange.coinbase.com/products/${encodeURIComponent(profile.cbPair)}/candles?granularity=60`;
+      const res = await fetch(url, {
+        signal: controller ? controller.signal : undefined,
+        headers: { Accept: "application/json" }
+      });
+      if (!res.ok) return null;
+      const rows = await res.json();
+      if (!Array.isArray(rows) || rows.length < 60) return null;
+      // Coinbase format: [time_sec, low, high, open, close, volume] newest first
+      rows.sort((a, b) => Number(a[0]) - Number(b[0]));
+      const slice = rows.slice(-300);
+      return slice.map((r, idx) => {
+        const dt = new Date(Number(r[0]) * 1000);
+        const hh = String(dt.getHours()).padStart(2, "0");
+        const mm = String(dt.getMinutes()).padStart(2, "0");
+        return {
+          idx,
+          time: `${hh}:${mm}`,
+          open: Number(r[3]),
+          high: Number(r[2]),
+          low: Number(r[1]),
+          close: Number(r[4]),
+          volume: Math.max(0.0001, Number(r[5]))
+        };
+      });
+    } catch (_err) {
+      return null;
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
+  }
+
+  function parseCsvBars(text) {
+    const lines = String(text || "").split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+    if (lines.length < 25) return null;
+    const firstCols = lines[0].split(",").map(s => s.trim().toLowerCase());
+    const hasHeader = isNaN(Number(firstCols[1])) || firstCols.some(c => /open|close|high|low|time|date/.test(c));
+    let iTime = 0, iOpen = 1, iHigh = 2, iLow = 3, iClose = 4, iVol = 5;
+    if (hasHeader) {
+      const findCol = re => firstCols.findIndex(c => re.test(c));
+      const ct = findCol(/time|date|ts/);
+      const co = findCol(/^open$|^o$/);
+      const ch = findCol(/^high$|^h$/);
+      const cl = findCol(/^low$|^l$/);
+      const cc = findCol(/^close$|^c$|^price$/);
+      const cv = findCol(/^vol|^v$/);
+      if (ct >= 0) iTime = ct;
+      if (co >= 0) iOpen = co;
+      if (ch >= 0) iHigh = ch;
+      if (cl >= 0) iLow = cl;
+      if (cc >= 0) iClose = cc;
+      if (cv >= 0) iVol = cv;
+    }
+
+    const out = [];
+    const startRow = hasHeader ? 1 : 0;
+    for (let r = startRow; r < lines.length; r++) {
+      const cols = lines[r].split(",").map(s => s.trim());
+      const close = Number(cols[iClose]);
+      if (!Number.isFinite(close) || close <= 0) continue;
+      const open = Number.isFinite(Number(cols[iOpen])) ? Number(cols[iOpen]) : close;
+      const high = Number.isFinite(Number(cols[iHigh])) ? Number(cols[iHigh]) : Math.max(open, close);
+      const low = Number.isFinite(Number(cols[iLow])) ? Number(cols[iLow]) : Math.min(open, close);
+      const volume = Math.max(1, Number.isFinite(Number(cols[iVol])) ? Number(cols[iVol]) : 1000);
+      const rawTime = cols[iTime] || formatMinuteET(out.length);
+      const timeMatch = rawTime.match(/(\d{1,2}:\d{2})/);
+      const time = timeMatch ? timeMatch[1].padStart(5, "0") : rawTime.slice(-5);
+      out.push({ idx: out.length, time, open, high, low, close, volume });
+    }
+    return out.length >= 25 ? out.slice(-390) : null;
+  }
+
+  function buildCausalSession(symbol, rawBars, sourceLabel, spreadBps, impactCoeff) {
+    const n = rawBars.length;
+    const meanVol = rawBars.reduce((s, b) => s + Number(b.volume || 1), 0) / Math.max(1, n);
+    const horizons = [5, 10, 15, 20];
+    const bars = new Array(n);
+
+    for (let i = 0; i < n; i++) {
+      const b = rawBars[i];
+      const relVol = Math.max(0.25, Number(b.volume || 1) / Math.max(1e-6, meanVol));
+
+      const vwaps = {};
+      const sigmas = {};
+      for (let hi = 0; hi < horizons.length; hi++) {
+        const h = horizons[hi];
+        const start = Math.max(0, i - h + 1);
+        let sumPV = 0, sumV = 0;
+        for (let j = start; j <= i; j++) {
+          const bj = rawBars[j];
+          const tp = (bj.high + bj.low + bj.close) / 3;
+          const vj = Math.max(1e-6, Number(bj.volume || 1));
+          sumPV += tp * vj;
+          sumV += vj;
+        }
+        const vwapH = sumPV / Math.max(1e-9, sumV);
+        let sumVar = 0;
+        for (let j = start; j <= i; j++) {
+          const bj = rawBars[j];
+          const vj = Math.max(1e-6, Number(bj.volume || 1));
+          const diff = bj.close - vwapH;
+          sumVar += vj * diff * diff;
+        }
+        const floorSig = Math.max(b.close * 0.00025, 1e-5);
+        vwaps[h] = vwapH;
+        sigmas[h] = Math.max(floorSig, Math.sqrt(sumVar / Math.max(1e-9, sumV)));
+      }
+
+      // Causal adaptive volume-clock weights (fast tilt on high rel_vol, anchor tilt on calm lull)
+      const volTilt = clamp((relVol - 1.0) / 1.8, -0.65, 1.25);
+      const rawW = [
+        Math.max(0.08, 0.35 + 0.16 * volTilt),
+        Math.max(0.10, 0.30 + 0.02 * volTilt),
+        Math.max(0.06, 0.20 - 0.09 * volTilt),
+        Math.max(0.04, 0.15 - 0.09 * volTilt)
+      ];
+      const wSum = rawW[0] + rawW[1] + rawW[2] + rawW[3];
+      const w5 = rawW[0] / wSum;
+      const w10 = rawW[1] / wSum;
+      const w15 = rawW[2] / wSum;
+      const w20 = rawW[3] / wSum;
+
+      const vwapStatic = 0.35 * vwaps[5] + 0.30 * vwaps[10] + 0.20 * vwaps[15] + 0.15 * vwaps[20];
+      const vwapAdaptive = w5 * vwaps[5] + w10 * vwaps[10] + w15 * vwaps[15] + w20 * vwaps[20];
+
+      const varWithin =
+        w5 * sigmas[5] * sigmas[5] +
+        w10 * sigmas[10] * sigmas[10] +
+        w15 * sigmas[15] * sigmas[15] +
+        w20 * sigmas[20] * sigmas[20];
+      const varBetween =
+        w5 * Math.pow(vwaps[5] - vwapAdaptive, 2) +
+        w10 * Math.pow(vwaps[10] - vwapAdaptive, 2) +
+        w15 * Math.pow(vwaps[15] - vwapAdaptive, 2) +
+        w20 * Math.pow(vwaps[20] - vwapAdaptive, 2);
+      const sigmaBlend = Math.max(b.close * 0.00025, Math.sqrt(varWithin + varBetween));
+      const zScore = (b.close - vwapAdaptive) / sigmaBlend;
+
+      bars[i] = {
+        idx: i,
+        time: b.time,
+        open: b.open,
+        high: b.high,
+        low: b.low,
+        close: b.close,
+        volume: b.volume,
+        rel_vol: Number(relVol.toFixed(3)),
+        vwap5: vwaps[5],
+        vwap10: vwaps[10],
+        vwap15: vwaps[15],
+        vwap20: vwaps[20],
+        sigma5: sigmas[5],
+        sigma10: sigmas[10],
+        sigma15: sigmas[15],
+        sigma20: sigmas[20],
+        vwap_static: vwapStatic,
+        vwap_adaptive: vwapAdaptive,
+        sigma_blend: sigmaBlend,
+        z_score: zScore,
+        w5,
+        w10,
+        w15,
+        w20
+      };
+    }
+
+    // Pick richest ~90-min spotlight window with most |z| >= 1.50 excursions
+    const winLen = Math.min(90, Math.max(40, n - 25));
+    let bestStart = Math.min(25, Math.max(0, n - winLen - 1));
+    let bestScore = -1;
+    for (let s = 20; s <= Math.max(20, n - winLen - 5); s += 5) {
+      let sc = 0;
+      for (let j = s; j < Math.min(n, s + winLen); j++) {
+        if (Math.abs(bars[j].z_score) >= 1.50) sc += 1;
+      }
+      if (sc > bestScore) {
+        bestScore = sc;
+        bestStart = s;
+      }
+    }
+    const bestEnd = Math.min(n - 1, bestStart + winLen);
+
+    return {
+      symbol,
+      sourceLabel,
+      spreadBps,
+      impactCoeff,
+      bars,
+      trades: [],
+      spotlight_window: {
+        start_idx: bestStart,
+        end_idx: bestEnd,
+        label: `${symbol} ${bars[bestStart].time}–${bars[bestEnd].time} ET Active Window`
+      }
+    };
+  }
+
+  function updateSymbolUI(symbol, badgeText, badgeClass) {
+    const input = $("symbolInput");
+    if (input) input.value = symbol;
+    const badge = $("symbolSourceBadge");
+    if (badge) {
+      badge.textContent = badgeText;
+      badge.classList.remove("live", "loading");
+      if (badgeClass) badge.classList.add(badgeClass);
+    }
+    const titleEl = $("chartMainTitle");
+    if (titleEl) {
+      titleEl.textContent = `Intraday 5–20m Blended VWAP · ${symbol}`;
+    }
+    document.querySelectorAll("#symbolChips .sym-chip").forEach(chip => {
+      chip.classList.toggle("active", chip.dataset.symbol === symbol);
+    });
+  }
+
+  function syncSymbolQueryParam(symbol) {
+    try {
+      const url = new URL(window.location.href);
+      if (symbol === "ES") url.searchParams.delete("symbol");
+      else url.searchParams.set("symbol", symbol);
+      window.history.replaceState({}, "", url.toString());
+    } catch (_err) {
+      // Ignore on file:/// if replaceState is restricted
+    }
+  }
+
+  async function loadSymbol(rawSymbol, opts = {}) {
+    const symbol = normalizeSymbolInput(rawSymbol);
+    state.symbol = symbol;
+    state.selectedTradeIdx = null;
+
+    if (symbol === "ES" && BENCHMARK_SESSION) {
+      RAW_SESSION = BENCHMARK_SESSION;
+      state.symbolSource = "benchmark";
+      state.symbolSpreadBps = Number((RAW_METRICS && RAW_METRICS.meta && RAW_METRICS.meta.spread_bps) ?? 0.6);
+      state.symbolImpactCoeff = Number((RAW_METRICS && RAW_METRICS.meta && RAW_METRICS.meta.impact_coeff) ?? 0.12);
+      updateSymbolUI("ES", "60-Session Benchmark", "");
+      if (!opts.skipUrl) syncSymbolQueryParam("ES");
+      recomputeAndRenderLab();
+      return;
+    }
+
+    const profile = getSymbolProfile(symbol);
+    state.symbolSpreadBps = profile.spreadBps;
+    state.symbolImpactCoeff = profile.impact;
+
+    // Immediately render deterministic calibrated 1m model so UI feels instantaneous
+    const { bars: simBars } = generateCalibratedSymbolBars(symbol);
+    RAW_SESSION = buildCausalSession(symbol, simBars, "Calibrated 1m Model", profile.spreadBps, profile.impact);
+    state.symbolSource = "model";
+    updateSymbolUI(symbol, profile.crypto ? "Fetching Live 1m…" : "Calibrated 1m Model", profile.crypto ? "loading" : "");
+    if (!opts.skipUrl) syncSymbolQueryParam(symbol);
+    recomputeAndRenderLab();
+
+    // If crypto pair, opportunistically upgrade to live 1m Coinbase Exchange candles
+    if (profile.crypto && !opts.offlineOnly) {
+      const liveBars = await tryFetchLiveCryptoBars(symbol, profile);
+      if (state.symbol !== symbol) return; // User switched symbols while fetching
+      if (liveBars && liveBars.length >= 60) {
+        RAW_SESSION = buildCausalSession(symbol, liveBars, "Live 1m Feed", profile.spreadBps, profile.impact);
+        state.symbolSource = "live";
+        updateSymbolUI(symbol, "Live 1m Feed", "live");
+        recomputeAndRenderLab();
+      } else {
+        updateSymbolUI(symbol, "Calibrated 1m Model", "");
+      }
+    }
+  }
+
+  function handleCsvFileUpload(file) {
+    if (!file) return;
+    const inferred = normalizeSymbolInput(file.name.replace(/\.[^.]+$/, "").slice(0, 12) || "CSV");
+    const reader = new FileReader();
+    reader.onload = () => {
+      const parsed = parseCsvBars(reader.result);
+      if (!parsed) {
+        updateSymbolUI(state.symbol, "Invalid CSV (need >=25 OHLCV rows)", "loading");
+        return;
+      }
+      state.symbol = inferred;
+      state.symbolSource = "csv";
+      state.symbolSpreadBps = 0.6;
+      state.symbolImpactCoeff = 0.12;
+      state.selectedTradeIdx = null;
+      RAW_SESSION = buildCausalSession(inferred, parsed, "Custom CSV", 0.6, 0.12);
+      updateSymbolUI(inferred, `Custom CSV (${parsed.length} bars)`, "live");
+      recomputeAndRenderLab();
+    };
+    reader.readAsText(file);
+  }
+
   /* ---------- Causal Intraday Re-Calculation Engine ---------- */
   function getZoomBounds() {
     const bars = RAW_SESSION.bars;
@@ -234,10 +687,11 @@
     const bars = RAW_SESSION.bars;
     const n = bars.length;
     const meta = (RAW_METRICS && RAW_METRICS.meta) || {};
-    const spreadBps = Number(meta.spread_bps ?? 0.6);
-    const impactCoeff = Number(meta.impact_coeff ?? 0.12);
+    const spreadBps = Number(state.symbol === "ES" ? (meta.spread_bps ?? 0.6) : (state.symbolSpreadBps ?? 0.6));
+    const impactCoeff = Number(state.symbol === "ES" ? (meta.impact_coeff ?? 0.12) : (state.symbolImpactCoeff ?? 0.12));
 
     const isDefaultAdaptive =
+      state.symbol === "ES" &&
       state.preset === "adaptive" &&
       Math.abs(state.entryZ - state.defaultEntryZ) < 1e-6 &&
       state.maxHold === state.defaultMaxHold;
@@ -484,10 +938,12 @@
     // Reference Net Sharpe: exact benchmark value when on flagship default, else annualized from simulated full-session trades
     let netSharpeDisp = "—";
     const isDefaultAdaptive =
+      state.symbol === "ES" &&
       state.preset === "adaptive" &&
       Math.abs(state.entryZ - state.defaultEntryZ) < 1e-6 &&
       state.maxHold === state.defaultMaxHold;
     const isDefaultStatic =
+      state.symbol === "ES" &&
       state.preset === "static" &&
       Math.abs(state.entryZ - state.defaultEntryZ) < 1e-6 &&
       state.maxHold === state.defaultMaxHold;
@@ -1949,6 +2405,26 @@
       window.open("blue_sheet.html", "_blank", "noopener");
     });
 
+    // Symbol input, chips & CSV import
+    const symForm = $("symbolForm");
+    if (symForm) {
+      symForm.addEventListener("submit", evt => {
+        evt.preventDefault();
+        loadSymbol($("symbolInput").value);
+      });
+    }
+    document.querySelectorAll("#symbolChips .sym-chip").forEach(chip => {
+      chip.addEventListener("click", () => loadSymbol(chip.dataset.symbol));
+    });
+    const csvInput = $("csvFileInput");
+    if (csvInput) {
+      csvInput.addEventListener("change", evt => {
+        const f = evt.target.files && evt.target.files[0];
+        if (f) handleCsvFileUpload(f);
+        evt.target.value = "";
+      });
+    }
+
     // Presets
     document.querySelectorAll("#presetGrid .preset-btn").forEach(btn => {
       btn.addEventListener("click", () => applyPreset(btn.dataset.preset));
@@ -2052,11 +2528,15 @@
     const tab = (params.get("tab") || hash || "lab").toLowerCase();
     const zoom = params.get("zoom");
     const preset = params.get("preset");
+    const sym = params.get("symbol");
     if (zoom && ["spotlight", "full", "open", "midday", "close"].includes(zoom)) {
       state.zoom = zoom;
     }
     if (preset && PRESETS[preset]) {
       state.preset = preset;
+    }
+    if (sym) {
+      state.symbol = normalizeSymbolInput(sym);
     }
     return tab;
   }
@@ -2073,6 +2553,7 @@
 
     RAW_METRICS = window.VWAP_DATA.metrics;
     RAW_SESSION = window.VWAP_DATA.session;
+    BENCHMARK_SESSION = window.VWAP_DATA.session;
 
     // Sync topbar metadata from engine meta
     const meta = RAW_METRICS.meta || {};
@@ -2111,8 +2592,13 @@
     const flagship = (RAW_METRICS.configs || []).find(c => c.is_flagship) || (RAW_METRICS.configs || [])[0];
     if (flagship) state.selectedConfigId = flagship.id;
 
-    // Render all views cleanly
-    recomputeAndRenderLab();
+    // Render all views cleanly (apply URL ?symbol= if requested)
+    if (state.symbol && state.symbol !== "ES") {
+      loadSymbol(state.symbol, { skipUrl: true });
+    } else {
+      updateSymbolUI("ES", "60-Session Benchmark", "");
+      recomputeAndRenderLab();
+    }
     renderFrontierChart();
     renderConfigInspector();
     renderWeightScheduleChart();
